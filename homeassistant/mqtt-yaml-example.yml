@@ -1,0 +1,133 @@
+
+mqtt:
+  sensor:
+    - name: "H4.8cb0 Temp"
+      unique_id: "h4_8cb0_temp_f"
+      state_topic: "bebop/sensor/h4_8cb0"
+      value_template: "{{ value_json.temperature_f }}"
+      device_class: temperature
+      unit_of_measurement: "°F"
+      device:
+        identifiers: "H4.8cb0"
+        manufacturer: "Moko"
+        name: "Moko H4 Bluetooth T/H"
+        model: "H4"
+
+    - name: "H4.8cb0 Humidity"
+      unique_id: "h4_8cb0_humid_pc"
+      state_topic: "bebop/sensor/h4_8cb0"
+      value_template: "{{ value_json.humidity_pc }}"
+      device_class: humidity
+      unit_of_measurement: "%"
+      device:
+        identifiers: "H4.8cb0"
+
+    - name: "H4.463d Temp"
+      unique_id: "h4_463d_temp_f"
+      unit_of_measurement: "°F"
+      device_class: temperature
+      state_topic: "bebop/sensor/h4_463d"
+      value_template: "{{ value_json.temperature_f }}"
+      device:
+        identifiers: "H4.463d"
+        manufacturer: "Moko"
+        name: "Moko H4 Bluetooth T/H"
+        model: "H4"
+
+    - name: "H4.463d Humidity"
+      unique_id: "h4_463d_humid_pc"
+      state_topic: "bebop/sensor/h4_463d"
+      device_class: humidity
+      unit_of_measurement: "%"
+      value_template: "{{ value_json.humidity_pc }}"
+      device:
+        identifiers: "H4.463d"
+
+    - name: "Victron Solar Charging Current"
+      unique_id: "vt_solar_current"
+      state_topic: "bebop/sensor/solar"
+      device_class: current
+      value_template: "{{ value_json.battery_charging_current }}"
+      unit_of_measurement: "A"
+      device:
+        identifiers: "VT.solar_charger"
+        manufacturer: "Victron"
+        name: "Victron Solar Charge Controller"
+
+    - name: "Victron Solar Power"
+      unique_id: "vt_solar_power"
+      state_topic: "bebop/sensor/solar"
+      value_template: "{{ value_json.solar_power }}"
+      unit_of_measurement: "W"
+      device_class: power
+      device:
+        identifiers: "VT.solar_charger"
+
+    - name: "Victron Solar Yield Today"
+      state_topic: "bebop/sensor/solar"
+      unique_id: "vt_solar_yield"
+      value_template: "{{ value_json.yield_today }}"
+      device_class: energy
+      unit_of_measurement: "Wh"
+      device:
+        identifiers: "VT.solar_charger"
+
+    - name: "Victron BMS Current"
+      state_topic: "bebop/sensor/bms"
+      unique_id: "vt_bms_current"
+      device_class: current
+      value_template: "{{ value_json.current }}"
+      unit_of_measurement: "A"
+      device:
+        identifiers: "VT.bms"
+        manufacturer: "Victron"
+        name: "Victron BMS"
+
+    - name: "Victron BMS Remaining Minutes"
+      state_topic: "bebop/sensor/bms"
+      unique_id: "vt_bms_remaining_mins"
+      device_class: duration
+      value_template: "{{ value_json.remaining_mins }}"
+      unit_of_measurement: "min"
+      device:
+        identifiers: "VT.bms"
+
+    - name: "Victron BMS SoC"
+      state_topic: "bebop/sensor/bms"
+      unique_id: "vt_bms_soc"
+      value_template: "{{ value_json.soc }}"
+      unit_of_measurement: "%"
+      device:
+        identifiers: "VT.bms"
+
+    - name: "Victron BMS Voltage"
+      state_topic: "bebop/sensor/bms"
+      unique_id: "vt_bms_voltage"
+      device_class: voltage
+      value_template: "{{ value_json.voltage }}"
+      unit_of_measurement: "V"
+      device:
+        identifiers: "VT.bms"
+        manufacturer: "Victron"
+        name: "Victron BMS"
+
+    - name: "Victron BMS Power"
+      state_topic: "bebop/sensor/bms"
+      unique_id: "vt_bms_power"
+      device_class: energy
+      value_template: "{{ value_json.power }}"
+      unit_of_measurement: "W"
+      device:
+        identifiers: "VT.bms"
+        manufacturer: "Victron"
+        name: "Victron BMS"
+
+command_line:
+  - sensor:
+      unique_id: "cpu_temp_c"
+      name: "CPU Temperature"
+      command: "cat /sys/class/thermal/thermal_zone0/temp"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      value_template: "{{ value | multiply(0.001) | round(1) }}"
+

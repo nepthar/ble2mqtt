@@ -1,0 +1,16 @@
+It's in the "service data" with key '0000feab-0000-1000-8000-00805f9b34fb'*
+
+Note: check for universality.
+
+The data looks like this:
+
+
+70006400f602470d4603d3ef7ff0463d
+      tttthhhh
+
+
+Where tttt and hhhh are simple hex -> binary conversions that map to tenths
+of a degree celsius and tenths of a percent humidity.
+
+
+The rest of the data is unknown

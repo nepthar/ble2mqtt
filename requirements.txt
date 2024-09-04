@@ -1,0 +1,4 @@
+requests
+victron_ble
+bleak
+aiomqtt
