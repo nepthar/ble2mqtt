@@ -7,9 +7,41 @@ from bleak import BleakScanner
 from bleak.backends.device import BLEDevice
 from bleak.backends.scanner import AdvertisementData
 
-from prometheus_client import Gauge, Counter, start_http_server
+from victron_ble.devices.base import OperationMode
+
+import prometheus_client as pc
+
+from cachetools import TTLCache
 
 OUTPUT = False
+
+# def make_metric(mname, val):
+#   metric = None
+#   match val:
+#     case Enum():
+#       states = [x.name.lower() for x in list(val.__class__)]
+#       metric = Enum(key, "BLE Forwarded enum", states=states)
+#     case float() | int():
+#       metric = Gauge(key, "BLE Forwarded gauge")
+#     case None:
+#       pass
+#     case _:
+#       pass
+
+#   return metric
+
+
+# def update_metric(metric, val):
+#   match val:
+#     case Enum():
+
+#     case float() | int():
+
+#     case _:
+#       raise Exception(f"Unable to update metric {metric} with unknown type, {val}")
+
+
+
 
 class Ble2Mqtt:
   """
@@ -29,30 +61,27 @@ class Ble2Mqtt:
 
   def __init__(self, config_map):
     self.known_devices = config_map['devices']
-    self.mqtt_addr = config_map['mqtt_broker_addr']
     self.mqtt_pub_interval_s = config_map['mqtt_pub_interval_s']
     self.mqtt_prefix = config_map['mqtt_prefix']
-    self.mqtt_user = config_map.get('mqtt_user')
-    self.mqtt_pass = config_map.get('mqtt_pass')
+    self.mqtt_client = aiomqtt.Client(
+      config_map['mqtt_broker_addr'],
+      username=config_map.get('mqtt_user'),
+      password=config_map.get('mqtt_pass'))
     self.queue = asyncio.Queue(maxsize=250)
     self.bs_callback = lambda dev, data: self.on_advertise(dev, data)
+
+    self.metric_cache = TTLCache(maxsize=10000, ttl=config_map['metric_ttl_s'])
 
     for device in self.known_devices.values():
       device.throttle_s = config_map["ble_throttle_s"]
 
-    self.queue_depth = Gauge('queue_depth', 'Queue depth')
+    self.queue_depth = pc.Gauge('queue_depth', 'Queue depth')
     self.queue_depth.set_function(lambda: self.queue.qsize())
 
-    self.bc = Counter('beacons', 'Number of BLE beacons seen', ['status'])
+    self.bc = pc.Counter('beacons', 'Number of BLE beacons seen', ['status'])
     self.bc_h = self.bc.labels('handled')
     self.bc_i = self.bc.labels('ignored')
-
-  def _queue_putall(self, items):
-    try:
-      for i in items:
-        self.queue.put_nowait(i)
-    except asyncio.QueueFull:
-      pass
+    self.bc_f = self.bc.labels('full')
 
   def _queue_getall(self):
     ret = []
@@ -72,32 +101,40 @@ class Ble2Mqtt:
       if readings_dict:
         readings_dict = {k: self.adjust_value(v) for k, v in readings_dict.items()}
         readings_json = json.dumps(readings_dict)
-        self.queue.put_nowait((found_device.name, readings_json))
-        self.bc_h.inc()
+        try:
+          self.queue.put_nowait((found_device.name, readings_json))
+          self.bc_h.inc()
+        except asyncio.QueueFull:
+          self.bc_f.inc()
         return
 
     self.bc_i.inc()
 
-
-
-  async def mqtt_publish(self):
+  async def process_queue(self):
     while True:
       await asyncio.sleep(self.mqtt_pub_interval_s)
 
       # Ensure that we only keep the most recent value for each key
       to_publish = { k: v for k, v in self._queue_getall() }
       if to_publish:
-        async with aiomqtt.Client(self.mqtt_addr, username=self.mqtt_user, password=self.mqtt_pass) as mqtt:
+
+        # Update all counters/gauges
+
+        async with self.mqtt_client as mqtt:
           for item in to_publish.items():
-            await mqtt.publish(f"{self.mqtt_prefix}{item[0]}", payload=str(item[1]))
+            await mqtt.publish(
+              f"{self.mqtt_prefix}{item[0]}", payload=str(item[1]))
 
   def prepare(self, loop):
     async def scan():
-      scanner = BleakScanner(detection_callback=self.bs_callback)
-      await scanner.start()
+      self.scanner = BleakScanner(detection_callback=self.bs_callback)
+      await self.scanner.start()
 
     loop.create_task(scan())
-    loop.create_task(self.mqtt_publish())
+    loop.create_task(self.process_queue())
+
+  async def stop(self):
+    await self.scanner.stop()
 
 
 def dump_names(loop):
@@ -120,20 +157,37 @@ if __name__ == "__main__":
 
   loop = asyncio.new_event_loop()
   asyncio.set_event_loop(loop)
+  ble2mqtt = None
 
   def ctrl_c(sig, frame):
+    if ble2mqtt:
+      loop.call_soon(ble2mqtt.stop)
     loop.stop()
     print("\nBye")
     sys.exit(0)
 
   signal.signal(signal.SIGINT, ctrl_c)
 
-  if sys.argv[1] == 'scan':
+  cmd = sys.argv[1] if len(sys.argv) > 1 else None
+
+  if cmd == 'scan':
     dump_names(loop)
+  elif cmd == 'test':
+    readings = {
+      "a": 3,
+      "b": 0.14,
+      "c": OperationMode.RECONDITION
+    }
+
+    for k, v in readings.items():
+      print(f"k, v: {k}, {v}")
+      make_metric(k, v, "x")
+    sys.exit(0)
   else:
     ble2mqtt = Ble2Mqtt(CurrentConfig)
     ble2mqtt.prepare(loop)
     ble2mqtt.queue.put_nowait(('b2m/alive', "true"))
 
-  start_http_server(8088)
+
+  pc.start_http_server(8088)
   loop.run_forever()

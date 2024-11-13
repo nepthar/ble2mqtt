@@ -5,9 +5,9 @@ workspace="b2m"
 # This is designed to be used with github.com/nepthar/ws.sh for "magic",
 # it can be sourced from bash, or it can be executed directly.
 
-
+# A "run" command from within the venv
 b2m.run() {
-  ./.venv/bin/python main.py "$@"
+  (source ./.venv/bin/activate && "$@")
 }
 
 # I've never run this, it's just notes for what I did.
