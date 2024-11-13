@@ -1,0 +1,15 @@
+[Unit]
+Description=Listen for bluetooth beacons and post them to MQTT
+After=network.target
+
+[Service]
+User=dietpi
+Group=dietpi
+WorkingDirectory=/home/dietpi/stacks/ble2mqtt
+ExecStart=/home/dietpi/stacks/ble2mqtt/.venv/bin/python main.py run
+Restart=on-failure
+RestartSec=5
+
+[Install]
+After=network-online.target
+Wants=network-online.target

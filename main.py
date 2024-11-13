@@ -7,6 +7,8 @@ from bleak import BleakScanner
 from bleak.backends.device import BLEDevice
 from bleak.backends.scanner import AdvertisementData
 
+from prometheus_client import Gauge, Counter, start_http_server
+
 OUTPUT = False
 
 class Ble2Mqtt:
@@ -38,6 +40,13 @@ class Ble2Mqtt:
     for device in self.known_devices.values():
       device.throttle_s = config_map["ble_throttle_s"]
 
+    self.queue_depth = Gauge('queue_depth', 'Queue depth')
+    self.queue_depth.set_function(lambda: self.queue.qsize())
+
+    self.bc = Counter('beacons', 'Number of BLE beacons seen', ['status'])
+    self.bc_h = self.bc.labels('handled')
+    self.bc_i = self.bc.labels('ignored')
+
   def _queue_putall(self, items):
     try:
       for i in items:
@@ -63,10 +72,13 @@ class Ble2Mqtt:
       if readings_dict:
         readings_dict = {k: self.adjust_value(v) for k, v in readings_dict.items()}
         readings_json = json.dumps(readings_dict)
-        #print(f"{found_device.name}: {readings_json}")
         self.queue.put_nowait((found_device.name, readings_json))
-        #self.queue.put_nowait(found_device.name, )
-        #self._queue_putall((f"{found_device.name}/{k}", v) for k, v in readings_dict.items())
+        self.bc_h.inc()
+        return
+
+    self.bc_i.inc()
+
+
 
   async def mqtt_publish(self):
     while True:
@@ -123,5 +135,5 @@ if __name__ == "__main__":
     ble2mqtt.prepare(loop)
     ble2mqtt.queue.put_nowait(('b2m/alive', "true"))
 
-
+  start_http_server(8088)
   loop.run_forever()

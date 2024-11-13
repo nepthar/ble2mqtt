@@ -7,7 +7,7 @@ workspace="b2m"
 
 
 b2m.run() {
-  ./run.sh python main.py
+  ./.venv/bin/python main.py "$@"
 }
 
 # I've never run this, it's just notes for what I did.
@@ -19,7 +19,7 @@ b2m.bootstrap() {
   python3 -m venv ./.venv
 
   # enter it
-  . .venv/bin/activate
+  source .venv/bin/activate
 
   # install all requirements
   pip install -r requirements.txt

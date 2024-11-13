@@ -24,3 +24,11 @@ To run indefinitely:
 ```
   ./run.sh python main.py run
 ```
+
+
+1. BLE Beacon broadcast noticed
+2. Data turned into key -> value pairs
+3. All gauges, updated when received
+4.
+
+Hm. Maybe just do the really simple thing and forward them along as gauges? The prometheus client doesn't like programatically generating metrics, but it does say that proxying them is a valid reason. I should look into this.
