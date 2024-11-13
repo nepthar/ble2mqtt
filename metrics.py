@@ -98,17 +98,18 @@ class State(PrometheusMetric):
 
 
 class Reporter:
-  def __init__(self, scope=tuple()):
+  def __init__(self, scope=list()):
     self.scope = scope
 
-  def scoped(self, scope):
-    return Reporter(self.scope + (scope,))
+  def scoped(self, *new_scope):
+    return Reporter(self.scope + list(new_scope))
 
   def _mk(self, klass, name, desc, **kwargs):
-    return klass(self.scope + (name,), desc, **kwargs)
+    fullname = '_'.join(self.scope + [name])
+    return klass(fullname, desc, **kwargs)
 
-  def counter(self, name, desc=' '):
-    return self._mk(pc.Counter, name, desc)
+  def counter(self, name, desc=' ', **kwargs):
+    return self._mk(pc.Counter, name, desc, **kwargs)
 
   def gauge(self, name, desc=' '):
     return self._mk(pc.Gauge, name, desc)
@@ -121,7 +122,7 @@ class Reporter:
 
 
 class NullReporter(Reporter):
-  NULL_METRIC = NullMetric(("null_metric",), "Ignored")
+  NULL_METRIC = NullMetric(["null_metric"], "Ignored")
 
   def _mk(self, klass, name, desc, **kwargs):
     return self.NULL_METRIC

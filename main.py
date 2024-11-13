@@ -13,6 +13,8 @@ import prometheus_client as pc
 
 from cachetools import TTLCache
 
+from metrics import NullReporter, Reporter
+
 OUTPUT = False
 
 # def make_metric(mname, val):
@@ -59,8 +61,9 @@ class Ble2Mqtt:
       case _:
         return val
 
-  def __init__(self, config_map):
+  def __init__(self, config_map, reporter=Reporter()):
     self.known_devices = config_map['devices']
+
     self.mqtt_pub_interval_s = config_map['mqtt_pub_interval_s']
     self.mqtt_prefix = config_map['mqtt_prefix']
     self.mqtt_client = aiomqtt.Client(
@@ -75,10 +78,12 @@ class Ble2Mqtt:
     for device in self.known_devices.values():
       device.throttle_s = config_map["ble_throttle_s"]
 
-    self.queue_depth = pc.Gauge('queue_depth', 'Queue depth')
+    self.reporter = reporter.scoped(*config_map.get('metric_prefix', []))
+
+    self.queue_depth = reporter.gauge("queue_depth", "Beacon reading queue depth")
     self.queue_depth.set_function(lambda: self.queue.qsize())
 
-    self.bc = pc.Counter('beacons', 'Number of BLE beacons seen', ['status'])
+    self.bc = self.reporter.counter('beacons', 'Number of BLE beacons seen', labelnames=['status'])
     self.bc_h = self.bc.labels('handled')
     self.bc_i = self.bc.labels('ignored')
     self.bc_f = self.bc.labels('full')
@@ -172,17 +177,6 @@ if __name__ == "__main__":
 
   if cmd == 'scan':
     dump_names(loop)
-  elif cmd == 'test':
-    readings = {
-      "a": 3,
-      "b": 0.14,
-      "c": OperationMode.RECONDITION
-    }
-
-    for k, v in readings.items():
-      print(f"k, v: {k}, {v}")
-      make_metric(k, v, "x")
-    sys.exit(0)
   else:
     ble2mqtt = Ble2Mqtt(CurrentConfig)
     ble2mqtt.prepare(loop)
