@@ -90,7 +90,6 @@ class Ble2Mqtt:
       states.add(zero_state_name)
 
       enum = pc.Enum(f"{self.pm_prefix}{key}", "Proxied Enum", states=list(states))
-      #REGISTRY.register(enum)
       self.state_cache[key] = enum
 
     enum.state(new_value.name.lower())
@@ -99,7 +98,6 @@ class Ble2Mqtt:
     gauge = self.gauge_cache.get(key)
     if not gauge:
       gauge = pc.Gauge(f"{self.pm_prefix}{key}", "Proxied Gauge")
-      #REGISTRY.register(gauge)
       self.gauge_cache[key] = gauge
     gauge.set(new_value)
 
@@ -128,7 +126,6 @@ class Ble2Mqtt:
 
   def update_metrics(self, to_publish):
     for devname, readings in to_publish.items():
-      print(readings)
       for k, v in readings.items():
         mkey = f"{devname}_{k}" #'_'.join(self.metric_path + (devname, k))
 
