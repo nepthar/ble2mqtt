@@ -1,7 +1,7 @@
 # This is a copy of Twitter's metrics merged with prometheus metrics.
 # It enables some helpful stuff.
 
-## TODO: Lables
+## TODO: Lables(?)
 
 import prometheus_client as pc
 
