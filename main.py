@@ -2,7 +2,7 @@
 import asyncio
 import aiomqtt
 import json
-from enum import Enum
+from enum import Enum, Flag
 from bleak import BleakScanner
 from bleak.backends.device import BLEDevice
 from bleak.backends.scanner import AdvertisementData
@@ -13,7 +13,7 @@ import prometheus_client as pc
 
 from cachetools import TTLCache
 
-from metrics import NullReporter, Reporter
+from metrics import NullReporter, Reporter, PrometheusCollector
 
 from prometheus_client.registry import Collector
 
@@ -57,15 +57,20 @@ class Ble2Mqtt:
     self.reporter = reporter.scoped(*self.metric_path)
 
     self.queue_depth = reporter.gauge("queue_depth", "Beacon reading queue depth")
-    self.queue_depth.set_function(lambda: self.queue.qsize())
+    self.queue_depth.set_fn(lambda: self.queue.qsize())
 
-    self.bc = self.reporter.counter('beacons', 'Number of BLE beacons seen', labelnames=['status'])
-    self.bc_h = self.bc.labels('handled')
-    self.bc_i = self.bc.labels('ignored')
-    self.bc_f = self.bc.labels('full')
+    # self.bc = self.reporter.counter('beacons', 'Number of BLE beacons seen', labelnames=['status'])
+    # self.bc_h = self.bc.labels('handled')
+    # self.bc_i = self.bc.labels('ignored')
+    # self.bc_f = self.bc.labels('full')
 
-    self.gauge_cache = TTLCache(maxsize=self.METRIC_CACHE_SIZE, ttl=config_map['metric_ttl_s'])
-    self.state_cache = TTLCache(maxsize=self.METRIC_CACHE_SIZE, ttl=config_map['metric_ttl_s'])
+    self.bc_s = self.reporter.counter('beacons_seen', 'seen')
+    self.bc_h = self.reporter.counter('beacons_handled', 'Beacons handled')
+    self.bc_i = self.reporter.counter('beacons_ignored')
+    self.bc_f = self.reporter.counter('beacons_dropped')
+
+    # self.gauge_cache = TTLCache(maxsize=self.METRIC_CACHE_SIZE, ttl=config_map['metric_ttl_s'])
+    # self.state_cache = TTLCache(maxsize=self.METRIC_CACHE_SIZE, ttl=config_map['metric_ttl_s'])
 
     self.unhandled_ctr = self.reporter.counter('unhandled_metric_type', 'Couldnt make it a gauge or enum')
 
@@ -78,28 +83,6 @@ class Ble2Mqtt:
     except asyncio.QueueEmpty:
       return ret
 
-  def _update_state(self, key, new_value):
-    enum = self.state_cache.get(key)
-    if not enum:
-      states = {s.name.lower() for s in list(new_value.__class__)}
-
-      # When you enumerate over a 'Flags' type, it skipps the zero case
-      # which corresponds to no flags present. However, it's still a
-      # state in the enumeration, so we have to manually add it here. Ugh.
-      zero_state_name = new_value.__class__(0).name.lower()
-      states.add(zero_state_name)
-
-      enum = pc.Enum(f"{self.pm_prefix}{key}", "Proxied Enum", states=list(states))
-      self.state_cache[key] = enum
-
-    enum.state(new_value.name.lower())
-
-  def _update_gauge(self, key, new_value):
-    gauge = self.gauge_cache.get(key)
-    if not gauge:
-      gauge = pc.Gauge(f"{self.pm_prefix}{key}", "Proxied Gauge")
-      self.gauge_cache[key] = gauge
-    gauge.set(new_value)
 
   def on_advertise(self, device: BLEDevice, advertisement: AdvertisementData):
     addr = device.address.upper()
@@ -108,44 +91,25 @@ class Ble2Mqtt:
     if found_device and not found_device.should_throttle():
       readings_dict = found_device.decode(device, advertisement)
       if readings_dict:
-        try:
-          self.queue.put_nowait((found_device.name, readings_dict))
-          self.bc_h.inc()
-        except asyncio.QueueFull:
-          self.bc_f.inc()
-        return
+        self.update_metrics_from_readings(found_device.name, readings_dict)
 
     self.bc_i.inc()
 
-  async def publish_to_mqtt(self, to_publish):
-    async with self.mqtt_client as mqtt:
-      for devname, readings in to_publish.items():
-        adjusted = { k: Ble2Mqtt.adjust_value(v) for k, v in readings.items() }
-        await mqtt.publish(
-          f"{self.mqtt_prefix}{devname}", payload=json.dumps(adjusted))
 
-  def update_metrics(self, to_publish):
-    for devname, readings in to_publish.items():
-      for k, v in readings.items():
-        mkey = f"{devname}_{k}" #'_'.join(self.metric_path + (devname, k))
+  def update_metrics_from_readings(self, devname, readings):
+    for key, val in readings.items():
 
-        match v:
-          case float() | int():
-            self._update_gauge(mkey, v)
-          case Enum():
-            self._update_state(mkey, v)
-          case _:
-            self.unhandled_ctr.inc()
+      dev_rep = self.reporter.scoped(devname)
+      mname = ':' + key
 
-  async def process_queue(self):
-    while True:
-      await asyncio.sleep(self.mqtt_pub_interval_s)
-
-      # Ensure we only keep the most recent value for each key
-      to_publish = { k: v for k, v in self._queue_getall() }
-      if to_publish:
-        self.update_metrics(to_publish)
-        await self.publish_to_mqtt(to_publish)
+      match val:
+        case float() | int():
+          val = round(val, 3)
+          gauge = dev_rep.gauge(mname).set(val)
+        case Enum() | Flag():
+          print(f"{mname}: Enum -> {val}")
+        case _:
+          print(f"{mname}: {val.__class__} -> {val}")
 
   def prepare(self, loop):
     async def scan():
@@ -153,7 +117,7 @@ class Ble2Mqtt:
       await self.scanner.start()
 
     loop.create_task(scan())
-    loop.create_task(self.process_queue())
+    #loop.create_task(self.process_queue())
 
   async def stop(self):
     await self.scanner.stop()
@@ -197,16 +161,8 @@ if __name__ == "__main__":
   else:
     ble2mqtt = Ble2Mqtt(CurrentConfig)
     ble2mqtt.prepare(loop)
-    ble2mqtt.queue.put_nowait(('b2m', {"alive": "true"}))
+    #ble2mqtt.queue.put_nowait(('b2m', {"alive": "true"}))
 
-  e = pc.Enum('my_test_enum', "desc", states=['one', 'two', 'three'])
-  e.state('one')
-
-  e.state('two')
-
-  e = pc.Gauge('fake_enum', "desc", ["state"])
-  e.labels('one').set(1)
-  e.labels('two').set(1)
-
-  pc.start_http_server(8088)
+  pm_collector = PrometheusCollector()
+  pm_collector.start()
   loop.run_forever()
