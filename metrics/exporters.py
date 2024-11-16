@@ -5,17 +5,75 @@ import prometheus_client.registry as pmr
 import prometheus_client as pm
 from prometheus_client.samples import Sample, Timestamp
 
+import json
+import aiomqtt
+
+from enum import Enum, Flag
+
+def adjust_value(val):
+  match val:
+    case float():
+      return round(val, 2)
+    case Enum() | Flag():
+      return val.name
+    case _:
+      return val
+
 
 class MqttExporter:
   def __init__(self, broker, username, password, publish_interval_s, registry=registry()):
     self.registry = registry
-    self.broker = broker
-    self.username = username
-    self.password = password
     self.interval_s = publish_interval_s
 
-  def export(self):
-    pass
+    self.mqtt_client = aiomqtt.Client(
+      hostname=broker,
+      username=username,
+      password=password,
+    )
+
+  async def export(self):
+    readings = list(self.registry.collect())
+    singles = []
+    dics = {}
+
+    for r in readings:
+      last_path = r.path[-1]
+      if ':' in last_path:
+        # This is a dict thingy.
+        k, _, v = last_path.partition(':')
+
+        key = '/'.join(r.path[:-1]) + '/' + k
+        collection = dics.get(key, list())
+        collection.append((v, r.value))
+        dics[key] = collection
+      else:
+        singles.append((r.path, r.value))
+
+    to_publish = []
+    for k, collection in dics.items():
+      values_json = {v[0]: v[1] for v in collection}
+      values_json = json.dumps(values_json)
+      to_publish.append((k, values_json))
+
+    for i in singles:
+      keyname = '/'.join(i[0])
+      value = str(adjust_value(i[1]))
+      to_publish.append((keyname, value))
+
+    print(to_publish)
+
+    async with self.mqtt_client as mqtt:
+      for key, value in to_publish:
+        await mqtt.publish(key, payload=value)
+
+
+
+
+
+
+
+
+
 
 class ProMetricHelper:
   """ We're just going to do this ourselves one day. God damn prometheus """

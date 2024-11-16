@@ -13,6 +13,14 @@ from metrics import reporter
 from metrics.exporters import *
 
 
+  # async def publish_to_mqtt(self, to_publish):
+  #   async with self.mqtt_client as mqtt:
+  #     for devname, readings in to_publish.items():
+  #       adjusted = { k: Ble2Mqtt.adjust_value(v) for k, v in readings.items() }
+  #       await mqtt.publish(
+  #         f"{self.mqtt_prefix}{devname}", payload=json.dumps(adjusted))
+
+
 class Ble2Mqtt:
   """
       Listens for BLE broadcasts from devices defined in config.py and
@@ -107,8 +115,15 @@ class Ble2Mqtt:
       self.scanner = BleakScanner(detection_callback=self.bs_callback)
       await self.scanner.start()
 
+    async def export_mqtt():
+      while True:
+        await asyncio.sleep(self.mqtt_exporter.interval_s)
+
+        await self.mqtt_exporter.export()
+
+
     loop.create_task(scan())
-    #loop.create_task(self.process_queue())
+    loop.create_task(export_mqtt())
 
   async def stop(self):
     await self.scanner.stop()
