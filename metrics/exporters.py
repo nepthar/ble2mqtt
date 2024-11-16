@@ -18,6 +18,7 @@ class MqttExporter:
     pass
 
 class ProMetricHelper:
+  """ We're just going to do this ourselves one day. God damn prometheus """
 
   def __init__(self, r, type):
     ts = Timestamp(r.timestamp, 0.0) if r.timestamp else None
@@ -50,6 +51,9 @@ class PrometheusExporter(pmr.Collector):
           yield ProMetricHelper(r, 'counter')
         case MetricKind.GAUGE:
           yield ProMetricHelper(r, 'gauge')
+        case MetricKind.STATE:
+          pass
+          #yield ProMetricHelper(r, 'gauge')
         case _:
           print(f"pc unhandled metric kind: {r.kind}")
 

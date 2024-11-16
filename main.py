@@ -91,16 +91,14 @@ class Ble2Mqtt:
 
   def update_metrics_from_readings(self, devname, readings):
     for key, val in readings.items():
-
-      dev_rep = self.reporter.scoped(devname)
-      mname = ':' + key
+      mname = devname + ':' + key
 
       match val:
         case float() | int():
           val = round(val, 3)
-          gauge = dev_rep.gauge(mname).set(val)
+          gauge = self.reporter.gauge(mname).set(val)
         case Enum() | Flag():
-          state = dev_rep.state(mname).set(val.name.lower())
+          state = self.reporter.state(mname).set(val.name.lower())
         case _:
           self.unhandled_ctr.inc()
 
