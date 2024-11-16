@@ -9,13 +9,8 @@ from bleak.backends.scanner import AdvertisementData
 
 from victron_ble.devices.base import OperationMode
 
-import prometheus_client as pc
-
-from cachetools import TTLCache
-
-from metrics import NullReporter, Reporter, PrometheusCollector
-
-from prometheus_client.registry import Collector
+from metrics import reporter
+from metrics.exporters import *
 
 
 class Ble2Mqtt:
@@ -36,16 +31,18 @@ class Ble2Mqtt:
       case _:
         return val
 
-  def __init__(self, config_map, reporter=Reporter()):
+  def __init__(self, config_map, reporter=reporter()):
     self.known_devices = config_map['devices']
     self.metric_path = tuple(config_map.get('metric_path', ()))
 
-    self.mqtt_pub_interval_s = config_map['mqtt_pub_interval_s']
-    self.mqtt_prefix = ('/'.join(self.metric_path) + '/') if self.metric_path else ''
-    self.mqtt_client = aiomqtt.Client(
-      config_map['mqtt_broker_addr'],
+    self.pm_exporter = PrometheusExporter()
+    self.mqtt_exporter = MqttExporter(
+      broker=config_map['mqtt_broker_addr'],
       username=config_map.get('mqtt_user'),
-      password=config_map.get('mqtt_pass'))
+      password=config_map.get('mqtt_pass'),
+      publish_interval_s=config_map['mqtt_pub_interval_s']
+    )
+
     self.queue = asyncio.Queue(maxsize=250)
     self.bs_callback = lambda dev, data: self.on_advertise(dev, data)
 
@@ -53,26 +50,17 @@ class Ble2Mqtt:
     for device in self.known_devices.values():
       device.throttle_s = config_map["ble_throttle_s"]
 
-    self.pm_prefix = ('_'.join(self.metric_path) + '_') if self.metric_path else ''
     self.reporter = reporter.scoped(*self.metric_path)
 
     self.queue_depth = reporter.gauge("queue_depth", "Beacon reading queue depth")
     self.queue_depth.set_fn(lambda: self.queue.qsize())
 
-    # self.bc = self.reporter.counter('beacons', 'Number of BLE beacons seen', labelnames=['status'])
-    # self.bc_h = self.bc.labels('handled')
-    # self.bc_i = self.bc.labels('ignored')
-    # self.bc_f = self.bc.labels('full')
+    bctr = self.reporter.counter('beacons', "How each beacon was processed")
+    self.bc_h = bctr.labeled("action", "handled")
+    self.bc_i = bctr.labeled("action", "ignored")
+    self.bc_t = bctr.labeled("action", "throttled")
 
-    self.bc_s = self.reporter.counter('beacons_seen', 'seen')
-    self.bc_h = self.reporter.counter('beacons_handled', 'Beacons handled')
-    self.bc_i = self.reporter.counter('beacons_ignored')
-    self.bc_f = self.reporter.counter('beacons_dropped')
-
-    # self.gauge_cache = TTLCache(maxsize=self.METRIC_CACHE_SIZE, ttl=config_map['metric_ttl_s'])
-    # self.state_cache = TTLCache(maxsize=self.METRIC_CACHE_SIZE, ttl=config_map['metric_ttl_s'])
-
-    self.unhandled_ctr = self.reporter.counter('unhandled_metric_type', 'Couldnt make it a gauge or enum')
+    self.unhandled_ctr = self.reporter.counter('unhandled', 'BLE Beacon data that could not become a metric')
 
   def _queue_getall(self):
     ret = []
@@ -83,15 +71,20 @@ class Ble2Mqtt:
     except asyncio.QueueEmpty:
       return ret
 
-
   def on_advertise(self, device: BLEDevice, advertisement: AdvertisementData):
     addr = device.address.upper()
     found_device = self.known_devices.get(addr)
 
-    if found_device and not found_device.should_throttle():
+    if found_device:
+      if found_device.should_throttle():
+        self.bc_t.inc()
+        return
+
       readings_dict = found_device.decode(device, advertisement)
       if readings_dict:
+        self.bc_h.inc()
         self.update_metrics_from_readings(found_device.name, readings_dict)
+        return
 
     self.bc_i.inc()
 
@@ -107,9 +100,9 @@ class Ble2Mqtt:
           val = round(val, 3)
           gauge = dev_rep.gauge(mname).set(val)
         case Enum() | Flag():
-          print(f"{mname}: Enum -> {val}")
+          state = dev_rep.state(mname).set(val.name.lower())
         case _:
-          print(f"{mname}: {val.__class__} -> {val}")
+          self.unhandled_ctr.inc()
 
   def prepare(self, loop):
     async def scan():
@@ -149,6 +142,8 @@ if __name__ == "__main__":
     if ble2mqtt:
       loop.call_soon(ble2mqtt.stop)
     loop.stop()
+    for line in LinesExporter().collect():
+      print(line)
     print("\nBye")
     sys.exit(0)
 
@@ -161,8 +156,7 @@ if __name__ == "__main__":
   else:
     ble2mqtt = Ble2Mqtt(CurrentConfig)
     ble2mqtt.prepare(loop)
+    ble2mqtt.pm_exporter.start()
     #ble2mqtt.queue.put_nowait(('b2m', {"alive": "true"}))
 
-  pm_collector = PrometheusCollector()
-  pm_collector.start()
   loop.run_forever()
