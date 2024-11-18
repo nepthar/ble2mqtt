@@ -9,9 +9,10 @@ from bleak.backends.scanner import AdvertisementData
 
 from victron_ble.devices.base import OperationMode
 
-from metrics import reporter
-from metrics.exporters import *
+from obs import reporter
+from obs.exporter import PrometheusExporter, LinesExporter
 
+from pprint import pp
 
   # async def publish_to_mqtt(self, to_publish):
   #   async with self.mqtt_client as mqtt:
@@ -44,12 +45,12 @@ class Ble2Mqtt:
     self.metric_path = tuple(config_map.get('metric_path', ()))
 
     self.pm_exporter = PrometheusExporter()
-    self.mqtt_exporter = MqttExporter(
-      broker=config_map['mqtt_broker_addr'],
-      username=config_map.get('mqtt_user'),
-      password=config_map.get('mqtt_pass'),
-      publish_interval_s=config_map['mqtt_pub_interval_s']
-    )
+    # self.mqtt_exporter = MqttExporter(
+    #   broker=config_map['mqtt_broker_addr'],
+    #   username=config_map.get('mqtt_user'),
+    #   password=config_map.get('mqtt_pass'),
+    #   publish_interval_s=config_map['mqtt_pub_interval_s']
+    # )
 
     self.queue = asyncio.Queue(maxsize=250)
     self.bs_callback = lambda dev, data: self.on_advertise(dev, data)
@@ -67,6 +68,8 @@ class Ble2Mqtt:
     self.bc_h = bctr.labeled("action", "handled")
     self.bc_i = bctr.labeled("action", "ignored")
     self.bc_t = bctr.labeled("action", "throttled")
+    self.bc_x = self.bc_t.labeled("path","500")
+    self.bc_x.inc()
 
     self.unhandled_ctr = self.reporter.counter('unhandled', 'BLE Beacon data that could not become a metric')
 
@@ -98,15 +101,15 @@ class Ble2Mqtt:
 
 
   def update_metrics_from_readings(self, devname, readings):
+    scoped = self.reporter.scoped(devname)
+    print(devname)
     for key, val in readings.items():
-      mname = devname + ':' + key
-
       match val:
         case float() | int():
           val = round(val, 3)
-          gauge = self.reporter.gauge(mname).set(val)
+          gauge = scoped.gauge(key).set(val)
         case Enum() | Flag():
-          state = self.reporter.state(mname).set(val.name.lower())
+          state = scoped.state(key).set(val.name.lower())
         case _:
           self.unhandled_ctr.inc()
 
@@ -119,11 +122,11 @@ class Ble2Mqtt:
       while True:
         await asyncio.sleep(self.mqtt_exporter.interval_s)
 
-        await self.mqtt_exporter.export()
+        #await self.mqtt_exporter.export()
 
 
     loop.create_task(scan())
-    loop.create_task(export_mqtt())
+    #loop.create_task(export_mqtt())
 
   async def stop(self):
     await self.scanner.stop()
@@ -155,8 +158,13 @@ if __name__ == "__main__":
     if ble2mqtt:
       loop.call_soon(ble2mqtt.stop)
     loop.stop()
-    for line in LinesExporter().collect():
-      print(line)
+    print("\n")
+    # #pp(LinesExporter().collect())
+
+    # for x in LinesExporter().collect():
+    #   pp(x)
+
+    pp(LinesExporter().getob())
     print("\nBye")
     sys.exit(0)
 

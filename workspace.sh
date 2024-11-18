@@ -7,7 +7,11 @@ workspace="b2m"
 
 # A "run" command from within the venv
 b2m.run() {
-  (source ./.venv/bin/activate && "$@")
+  ./.venv/bin/python "$@"
+}
+
+b2m.pip() {
+  ./.venv/bin/pip "$@"
 }
 
 # I've never run this, it's just notes for what I did.
