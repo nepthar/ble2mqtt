@@ -19,8 +19,8 @@ def dig(dict_like, keys):
 
 class Ble2Mqtt:
   """
-      Listens for BLE broadcasts from devices defined in config.py and
-      publishes those to mqtt, providing some deduping and rate limiting
+  Listens for BLE broadcasts from devices defined in config.py and
+  publishes those to mqtt, providing some deduping and rate limiting
   """
 
   METRIC_CACHE_SIZE = 10000
@@ -36,25 +36,22 @@ class Ble2Mqtt:
         return val
 
   def __init__(self, config_map, reporter=reporter()):
-    self.known_devices = config_map['devices']
-    self.metric_path = tuple(config_map.get('metric_path', ()))
+    self.known_devices = config_map["devices"]
+    self.metric_path = tuple(config_map.get("metric_path", ()))
 
     self.mqtt_exporter = MqttPublisher(
-      broker=config_map['mqtt_broker_addr'],
-      username=config_map.get('mqtt_user'),
-      password=config_map.get('mqtt_pass'),
+      broker=config_map["mqtt_broker_addr"],
+      username=config_map.get("mqtt_user"),
+      password=config_map.get("mqtt_pass"),
       prefix=self.metric_path,
-      registry=reporter.registry
+      registry=reporter.registry,
     )
 
-    self.mqtt_pub_interval_s = config_map['mqtt_pub_interval_s']
+    self.mqtt_pub_interval_s = config_map["mqtt_pub_interval_s"]
 
-    self.om_server = OpenMetricPublisher(
-      reporter.registry,
-      port=8088
-    )
+    self.om_server = OpenMetricPublisher(reporter.registry, port=8088)
 
-    #self.queue = asyncio.Queue(maxsize=250)
+    # self.queue = asyncio.Queue(maxsize=250)
     self.bs_callback = lambda dev, data: self.on_advertise(dev, data)
 
     ## TODO: Make this NOT per-device?
@@ -64,12 +61,14 @@ class Ble2Mqtt:
     self.int_metrics = reporter.scoped("ble2mqtt")
     self.reporter = reporter.scoped(*self.metric_path)
 
-    bctr = self.int_metrics.counter('beacons', "How each beacon was processed")
+    bctr = self.int_metrics.counter("beacons", "How each beacon was processed")
     self.bc_h = bctr.labeled("action", "handled")
     self.bc_i = bctr.labeled("action", "ignored")
     self.bc_t = bctr.labeled("action", "throttled")
 
-    self.unhandled_ctr = self.int_metrics.counter('unhandled', 'BLE Beacon data that could not become a metric')
+    self.unhandled_ctr = self.int_metrics.counter(
+      "unhandled", "BLE Beacon data that could not become a metric"
+    )
 
   def _queue_getall(self):
     ret = []
@@ -130,6 +129,7 @@ class Ble2Mqtt:
     loop.stop()
     loop.close()
 
+
 def dump_names(loop):
   def on_advertise(device: BLEDevice, adv: AdvertisementData):
     if device.name:
@@ -160,7 +160,7 @@ if __name__ == "__main__":
 
   cmd = sys.argv[1] if len(sys.argv) > 1 else None
 
-  if cmd == 'scan':
+  if cmd == "scan":
     dump_names(loop)
   else:
     ble2mqtt = Ble2Mqtt(CurrentConfig)

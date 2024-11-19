@@ -27,13 +27,13 @@ c3l3.inc()
 c3l2.inc()
 c3l3.inc()
 
+
 def process_readings(readings):
   if not readings:
     return None
 
   if len(readings) == 1:
     return readings[0]
-
 
   # otherwise build our labels
   reading_dict = {}
@@ -50,12 +50,13 @@ def process_readings(readings):
 def combine(prefix=()):
   combined = {}
   for reading in default_registry().readings(prefix):
-    group_key = reading.group('/')
+    group_key = reading.group("/")
     key = reading.flatkey()
 
     combined.setdefault(group_key, {})
     combined[group_key][key] = process_readings([reading])
 
   return combined
+
 
 pp(combine())

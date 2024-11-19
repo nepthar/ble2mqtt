@@ -28,7 +28,7 @@ class MqttPublisher:
   async def publish(self):
     to_publish = {}
     for r in self.registry.readings(self.prefix):
-      group = r.group('/')
+      group = r.group("/")
       key = r.flatkey()
 
       to_publish.setdefault(group, {})
@@ -51,7 +51,7 @@ class OpenMetricPublisher:
     async def handle_stats(request):
       return web.Response(text="\n".join(self.collect_lines()))
 
-    self.app.add_routes([web.get('/stats', handle_stats)])
+    self.app.add_routes([web.get("/stats", handle_stats)])
 
   def setup(self, loop):
     # set up aiohttp - like run_app, but non-blocking
@@ -62,7 +62,6 @@ class OpenMetricPublisher:
 
   async def stop(self):
     await self.runner.cleanup()
-
 
   def collect_lines(self):
     return (r.om_str() for r in self.registry.readings())

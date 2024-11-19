@@ -43,37 +43,36 @@ class Reading:
   def flatkey(self):
     oml = self.om_labels()
     name = self.path[-1]
-    return name + ''.join(['{', oml, '}']) if oml else name
+    return name + "".join(["{", oml, "}"]) if oml else name
 
   def om_labels(self):
-    """ OpenMetrics representation of the labels """
-    return ", ".join(f"{k}=\"{v}\"" for k, v in sorted(self.labels.items()))
+    """OpenMetrics representation of the labels"""
+    return ", ".join(f'{k}="{v}"' for k, v in sorted(self.labels.items()))
 
   def om_help(self):
-    """ OpenMetrics render of the help with this reading """
+    """OpenMetrics render of the help with this reading"""
     return f"# HELP {self.desc}"
 
   def om_str(self):
-    """ OpenMetrics rendering of this reading """
-    parts = [self.group('_'), '_', self.flatkey(), ' ', str(self.value)]
+    """OpenMetrics rendering of this reading"""
+    parts = [self.group("_"), "_", self.flatkey(), " ", str(self.value)]
     if self.val.at:
-      parts.append(' ')
+      parts.append(" ")
       parts.append(str(round(self.val.at)))
 
-    return ''.join(parts)
+    return "".join(parts)
 
 
 class Metric:
-
   __slots__ = (
-    'path',
-    'desc',
-    'value',
-    'value_fn',
-    'reporter',
-    'kwargs',
-    'labeles',
-    'last_sample_at'
+    "path",
+    "desc",
+    "value",
+    "value_fn",
+    "reporter",
+    "kwargs",
+    "labeles",
+    "last_sample_at",
   )
 
   # The kind of metric used to generate Record
@@ -82,16 +81,9 @@ class Metric:
   # Whether or not this metric allows `value_fn`
   allow_fn: True
 
-  def __init__(self,
-      reporter,
-      path,
-      desc='',
-      labels=dict(),
-      value=None,
-      value_fn=None,
-      **kwargs
-    ):
-
+  def __init__(
+    self, reporter, path, desc="", labels=dict(), value=None, value_fn=None, **kwargs
+  ):
     if not path:
       raise Exception("Path must not be empty")
 
@@ -121,8 +113,8 @@ class Metric:
     return self.reporter.with_labels(self, new_labels)
 
   def peek(self):
-    """ Peek at the value of this metric. Sometimes this is not possible
-        Like in histograms, etc.
+    """Peek at the value of this metric. Sometimes this is not possible
+    Like in histograms, etc.
     """
     if self.value:
       return self.value
@@ -133,7 +125,7 @@ class Metric:
     return "n/a"
 
   def set_fn(self, value_fn):
-    """ Have this metric use `value_fn` to retrieve the value when collected """
+    """Have this metric use `value_fn` to retrieve the value when collected"""
     assert self.last_sample_at == 0, "Cannot set a function once a metric has been used"
     self.last_sample_at = 0
     self.value_fn = value_fn
@@ -168,7 +160,7 @@ class Metric:
       return True
     elif self.path == other.path:
       return tuple(self.labels.keys()) < tuple(other.labels.keys())
-    else: # self.path > other.path
+    else:  # self.path > other.path
       return False
 
   def __eq__(self, other):
@@ -191,6 +183,7 @@ class Counter(Metric):
 
 class Gauge(Metric):
   kind = MetricKind.GAUGE
+
   def _init_metric_(self, value=0.0, value_fn=None, **kwargs):
     self.value = value
     self.value_fn = value_fn
@@ -229,7 +222,8 @@ class Stat(Metric):
 
 
 class NullMetric(Metric):
-  """ Does nothing successfully """
+  """Does nothing successfully"""
+
   def _init_metric_(*args, **kwargs):
     pass
 

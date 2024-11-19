@@ -17,10 +17,11 @@ def list_starts_with(lst, prefix_lst):
 
   return True
 
+
 class Registry:
   def __init__(self):
     # stored as: :
-    #{ (the, path): { (): Metric, (label1, lablevalue1): Metric }
+    # { (the, path): { (): Metric, (label1, lablevalue1): Metric }
     # That is, `metrics` is a dict of dicts, where the key for the first
     # is the metric path, and the key for the second is the metric labels,
     # sorted and turned into a tuple of tuple (k, v).
@@ -38,13 +39,7 @@ class Registry:
         raise Exception("Metric class mismatch")
       return metric
 
-    metric = klass(
-      reporter=reporter,
-      path=path,
-      desc=desc,
-      labels=labels,
-      **kwargs
-    )
+    metric = klass(reporter=reporter, path=path, desc=desc, labels=labels, **kwargs)
 
     self.metrics[path][l_id] = metric
     return metric
@@ -54,6 +49,7 @@ class Registry:
     lenpf = len(path_filter)
 
     if path_filter:
+
       def include(key):
         lk = len(key)
         if lk < lenpf:
@@ -93,8 +89,8 @@ class Registry:
       current_level[path[-1]] = [m.to_reading() for m in mgroup.values()]
     return tree
 
-class ThreadsafeRegistry:
 
+class ThreadsafeRegistry:
   def __init__(self):
     self._reg = Registry()
     self.lock = RLock()
@@ -121,7 +117,7 @@ class MetricReporter:
       path=self.path + (name,),
       desc=desc,
       labels=labels,
-      **kwargs
+      **kwargs,
     )
 
   def scoped(self, *new_path):
@@ -133,28 +129,25 @@ class MetricReporter:
       name=metric.path[-1],
       desc=metric.desc,
       labels=labels,
-      **metric.kwargs
+      **metric.kwargs,
     )
 
-  def counter(self, name, desc=''):
+  def counter(self, name, desc=""):
     return self._mk_(Counter, name, desc)
 
-  def gauge(self, name, desc=''):
+  def gauge(self, name, desc=""):
     return self._mk_(Gauge, name, desc)
 
-  def stat(self, name, desc='', **kwargs):
+  def stat(self, name, desc="", **kwargs):
     return self._mk_(Stat, name, desc, **kwargs)
 
-  def state(self, name, desc='', state=None, states=set(), **kwargs):
+  def state(self, name, desc="", state=None, states=set(), **kwargs):
     return self._mk_(State, name, desc, state=state, states=states, **kwargs)
 
 
 class NullMetricReporter(MetricReporter):
   def __init__(self):
-    self.null_metric = NullMetric(
-      reporter=self,
-      path=("null",),
-      desc="NullMetric")
+    self.null_metric = NullMetric(reporter=self, path=("null",), desc="NullMetric")
 
   def scoped(self, *args, **kwargs):
     return self.null_metric
