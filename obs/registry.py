@@ -6,6 +6,20 @@ from threading import RLock
 import time
 
 
+# Canonicalize labels
+def label_id(label_dict):
+  return tuple(sorted(label_dict.items())) if label_dict else ()
+
+
+def list_starts_with(lst, prefix_lst):
+  if len(lst) < len(prefix_lst):
+    return False
+
+  for i in range(len(prefix_lst)):
+    if lst[i] != prefix_lst[i]:
+      return False
+
+  return True
 
 class Registry:
   def __init__(self):
@@ -15,11 +29,6 @@ class Registry:
     # is the metric path, and the key for the second is the metric labels,
     # sorted and turned into a tuple of tuple (k, v).
     self.metrics = dict()
-
-  def get(self, path, labels):
-    found_group = self.metrics.get(path)
-    if found_group:
-      return self.found_group.get(label_id(labels))
 
   def find_or_create(self, klass, reporter, path, desc, labels, **kwargs):
     if path not in self.metrics:
@@ -44,35 +53,49 @@ class Registry:
     self.metrics[path][l_id] = metric
     return metric
 
-  def value(self, path, labels=()):
-    found = self.get(path, labels)
-    return found.peek() if found else None
+  def _items_(self, path_filter):
+    keys = self.metrics.keys()
+    lenpf = len(path_filter)
 
-  def metrics(self):
-    yield from (m for m in sorted(self.metrics.values()) if not m.is_parent())
+    if path_filter:
+      def include(key):
+        lk = len(key)
+        if lk < lenpf:
+          return False
+        for i in range(lenpf):
+          if key[i] != path_filter[i]:
+            return False
+        return True
 
-  def collect(self):
-    for group in self.metrics.values():
-      for m in group.values():
-        yield from m.collect()
+      keys = filter(include, keys)
 
-  def as_dict(self):
-    nested_dict = {}
-    as_list = sorted(self.metrics.items(), key=lambda x: x[0])
+    # Guarantee sorted items
+    for key in sorted(keys):
+      # Remove the prefix given by the filter
+      path = key[lenpf:]
+      yield (path, self.metrics[key])
 
-    for path, group in as_list:
-      current_level = nested_dict
+  def readings(self, path_filter=()):
+    for _, mgroup in self._items_(path_filter):
+      for metric in mgroup.values():
+        # Skip the "unlabeled" metric in a labeled group
+        if len(mgroup) > 1 and not metric.labels:
+          continue
+        yield metric.to_reading()
+
+  def readings_groups(self, path_filter=()):
+    for path, mgroup in self._items_(path_filter):
+      yield (path, [v.to_reading() for v in mgroup.values()])
+
+  def readings_tree(self, path_filter=()):
+    tree = {}
+    for path, mgroup in self._items_(path_filter):
+      current_level = tree
       for key in path[:-1]:
+        # Ensure the "path" exists in the tree structure
         current_level = current_level.setdefault(key, {})
-
-      collected = []
-      for metric in group.values():
-        collected.append(metric.value_2())
-
-      current_level[path[-1]] = collected
-
-    return nested_dict
-
+      current_level[path[-1]] = [m.to_reading() for m in mgroup.values()]
+    return tree
 
 class ThreadsafeRegistry:
 
@@ -84,12 +107,10 @@ class ThreadsafeRegistry:
     with self.lock:
       return self._reg.find_or_create(klass, reporter, path, desc, labels, **kwargs)
 
-  def collect(self):
-    metrics = []
+  def _items_(self, path_filter=()):
+    # Materialize items into a list right away and release the lock
     with self.lock:
-      metrics = sorted(self.metrics.values())
-    for m in metrics:
-      yield from m.collect()
+      return list(self._reg._items_(path_filter))
 
 
 class MetricReporter:
@@ -98,7 +119,6 @@ class MetricReporter:
     self.registry = registry
 
   def _mk_(self, klass, name, desc, labels=dict(), **kwargs):
-    print(kwargs)
     return self.registry.find_or_create(
       klass=klass,
       reporter=self,
@@ -111,7 +131,6 @@ class MetricReporter:
   def scoped(self, *new_path):
     return MetricReporter(self.registry, self.path + tuple(new_path))
 
-
   def with_labels(self, metric, labels):
     return self._mk_(
       klass=metric.__class__,
@@ -120,28 +139,6 @@ class MetricReporter:
       labels=labels,
       **metric.kwargs
     )
-
-  # def labeled_old(self, metric, labels):
-  #   if metric.parent:
-  #     return self.labeled(metric.parent, labels)
-
-  #   new_m_id = _metric_id(metric.path, labels)
-
-  #   if new_m_id == metric.id:
-  #     return metric
-
-  #   labeled_metric = self._mk_(
-  #     klass=metric.__class__,
-  #     name=metric.path[-1],
-  #     desc=metric.desc,
-  #     labels=labels,
-  #     **metric.kwargs
-  #   )
-
-  #   labeled_metric.parent = metric
-  #   metric.children.add(labeled_metric)
-
-  #   return labeled_metric
 
   def counter(self, name, desc=''):
     return self._mk_(Counter, name, desc)

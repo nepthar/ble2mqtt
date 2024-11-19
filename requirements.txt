@@ -2,5 +2,4 @@ requests
 victron_ble
 bleak
 aiomqtt
-prometheus_client
-cachetools
+aiohttp

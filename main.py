@@ -9,17 +9,22 @@ from bleak.backends.scanner import AdvertisementData
 
 from victron_ble.devices.base import OperationMode
 
-from obs import reporter
-from obs.exporter import PrometheusExporter, LinesExporter
+from obs import reporter, default_registry
+
+from consumers import MqttPublisher, OpenMetricPublisher
+
+#from obs.exporter import PrometheusExporter, LinesExporter
+
+
 
 from pprint import pp
 
-  # async def publish_to_mqtt(self, to_publish):
-  #   async with self.mqtt_client as mqtt:
-  #     for devname, readings in to_publish.items():
-  #       adjusted = { k: Ble2Mqtt.adjust_value(v) for k, v in readings.items() }
-  #       await mqtt.publish(
-  #         f"{self.mqtt_prefix}{devname}", payload=json.dumps(adjusted))
+def dig(dict_like, keys):
+  if not keys:
+    return dict_like
+  key = keys[0]
+  if key in dict_like:
+    return dig(dict_like[key], keys[1:])
 
 
 class Ble2Mqtt:
@@ -44,34 +49,37 @@ class Ble2Mqtt:
     self.known_devices = config_map['devices']
     self.metric_path = tuple(config_map.get('metric_path', ()))
 
-    self.pm_exporter = PrometheusExporter()
-    # self.mqtt_exporter = MqttExporter(
-    #   broker=config_map['mqtt_broker_addr'],
-    #   username=config_map.get('mqtt_user'),
-    #   password=config_map.get('mqtt_pass'),
-    #   publish_interval_s=config_map['mqtt_pub_interval_s']
-    # )
+    self.mqtt_exporter = MqttPublisher(
+      broker=config_map['mqtt_broker_addr'],
+      username=config_map.get('mqtt_user'),
+      password=config_map.get('mqtt_pass'),
+      prefix=self.metric_path,
+      registry=reporter.registry
+    )
 
-    self.queue = asyncio.Queue(maxsize=250)
+    self.mqtt_pub_interval_s = config_map['mqtt_pub_interval_s']
+
+    self.om_server = OpenMetricPublisher(
+      reporter.registry,
+      port=8088
+    )
+
+    #self.queue = asyncio.Queue(maxsize=250)
     self.bs_callback = lambda dev, data: self.on_advertise(dev, data)
 
     ## TODO: Make this NOT per-device?
     for device in self.known_devices.values():
       device.throttle_s = config_map["ble_throttle_s"]
 
+    self.int_metrics = reporter.scoped("ble2mqtt")
     self.reporter = reporter.scoped(*self.metric_path)
 
-    self.queue_depth = reporter.gauge("queue_depth", "Beacon reading queue depth")
-    self.queue_depth.set_fn(lambda: self.queue.qsize())
-
-    bctr = self.reporter.counter('beacons', "How each beacon was processed")
+    bctr = self.int_metrics.counter('beacons', "How each beacon was processed")
     self.bc_h = bctr.labeled("action", "handled")
     self.bc_i = bctr.labeled("action", "ignored")
     self.bc_t = bctr.labeled("action", "throttled")
-    self.bc_x = self.bc_t.labeled("path","500")
-    self.bc_x.inc()
 
-    self.unhandled_ctr = self.reporter.counter('unhandled', 'BLE Beacon data that could not become a metric')
+    self.unhandled_ctr = self.int_metrics.counter('unhandled', 'BLE Beacon data that could not become a metric')
 
   def _queue_getall(self):
     ret = []
@@ -99,10 +107,8 @@ class Ble2Mqtt:
 
     self.bc_i.inc()
 
-
   def update_metrics_from_readings(self, devname, readings):
     scoped = self.reporter.scoped(devname)
-    print(devname)
     for key, val in readings.items():
       match val:
         case float() | int():
@@ -120,17 +126,19 @@ class Ble2Mqtt:
 
     async def export_mqtt():
       while True:
-        await asyncio.sleep(self.mqtt_exporter.interval_s)
-
-        #await self.mqtt_exporter.export()
-
+        await asyncio.sleep(self.mqtt_pub_interval_s)
+        await self.mqtt_exporter.publish()
 
     loop.create_task(scan())
-    #loop.create_task(export_mqtt())
+    self.om_server.setup(loop)
+
+    loop.create_task(export_mqtt())
 
   async def stop(self):
     await self.scanner.stop()
-
+    await self.om_server.stop()
+    loop.stop()
+    loop.close()
 
 def dump_names(loop):
   def on_advertise(device: BLEDevice, adv: AdvertisementData):
@@ -147,6 +155,7 @@ def dump_names(loop):
 
 if __name__ == "__main__":
   from config import CurrentConfig
+  from consumers import MqttPublisher
   import sys
   import signal
 
@@ -155,17 +164,7 @@ if __name__ == "__main__":
   ble2mqtt = None
 
   def ctrl_c(sig, frame):
-    if ble2mqtt:
-      loop.call_soon(ble2mqtt.stop)
-    loop.stop()
-    print("\n")
-    # #pp(LinesExporter().collect())
-
-    # for x in LinesExporter().collect():
-    #   pp(x)
-
-    pp(LinesExporter().getob())
-    print("\nBye")
+    print("\nBye!")
     sys.exit(0)
 
   signal.signal(signal.SIGINT, ctrl_c)
@@ -177,7 +176,5 @@ if __name__ == "__main__":
   else:
     ble2mqtt = Ble2Mqtt(CurrentConfig)
     ble2mqtt.prepare(loop)
-    ble2mqtt.pm_exporter.start()
-    #ble2mqtt.queue.put_nowait(('b2m', {"alive": "true"}))
 
   loop.run_forever()

@@ -2,9 +2,6 @@ import time
 from enum import Enum
 from dataclasses import dataclass
 
-# Canonicalize labels
-def label_id(label_dict):
-  return tuple(sorted(label_dict.items())) if label_dict else ()
 
 class MetricKind(Enum):
   COUNTER = 1
@@ -13,76 +10,62 @@ class MetricKind(Enum):
   STAT = 4
   INFO = 5
 
+
 @dataclass
 class Value:
-  val: any
-  labels: dict[str, str]
-  timestamp: float
-
-@dataclass
-class ReadingX:
-  """ metric id -> value pair with a timestamp, exported """
-  kind: MetricKind
-  path: tuple[str]
   value: any
-  desc: str
-
-  def as_line(self, ts=True):
-    """ Convert this reading to a basic Prometheus/OpenMetric line """
-    ts_part = f" {self.timestamp}" if ts and self.timestamp > 1 else ""
-    return f"{_metric_id_str(self.path, self.labels)} {self.value}{ts_part}"
+  labels: dict[str, str]
+  at: float
 
 
 @dataclass
 class Reading:
   kind: MetricKind
   path: tuple[str]
-  value: Value
+  val: Value
   desc: str
 
+  @property
+  def value(self):
+    return self.val.value
 
-@dataclass
-class Thing:
-  kind: MetricKind
-  path: tuple[str]
-  reading: Reading
-  desc: desc
+  @property
+  def labels(self):
+    return self.val.labels
 
-def _metric_id(path, labels):
-  return path + tuple(sorted(labels.items()))
+  @property
+  def at(self):
+    return self.val.at
 
-def _metric_id_str(path, labels):
-  path_part = "/".join(path)
-  label_part = ""
-  if labels:
-    label_part = "{" + ",".join(f"{k}={v}" for k, v in label_id(labels)) + "}"
-  return path_part + label_part
+  def group(self, join_char=None):
+    return join_char.join(self.path[:-1]) if join_char else self.path[:-1]
 
-# @dataclass
-# class Path:
-#   metric_id: tuple
+  def flatkey(self):
+    oml = self.om_labels()
+    name = self.path[-1]
+    return name + ''.join(['{', oml, '}']) if oml else name
 
-#   def path(self):
-#     return path[:-1]
+  def om_labels(self):
+    """ OpenMetrics representation of the labels """
+    return ", ".join(f"{k}=\"{v}\"" for k, v in sorted(self.labels.items()))
 
-#   def name(self):
-#     return path[-2:-1]
+  def om_help(self):
+    """ OpenMetrics render of the help with this reading """
+    return f"# HELP {self.desc}"
 
-#   def labels(self):
-#     return dict(path[-1])
+  def om_str(self):
+    """ OpenMetrics rendering of this reading """
+    parts = [self.group('_'), '_', self.flatkey(), ' ', str(self.value)]
+    if self.val.at:
+      parts.append(' ')
+      parts.append(str(round(self.val.at)))
 
-#   def __lt__(self, other):
-#     return self.metric_id < other.metric_id
-
-#   def __hash__(self):
-#     return hash(self.metric_id)
-
+    return ''.join(parts)
 
 
 class Metric:
 
   __slots__ = (
-    'id',
     'path',
     'desc',
     'value',
@@ -90,7 +73,6 @@ class Metric:
     'reporter',
     'kwargs',
     'labeles',
-    'children',
     'last_sample_at'
   )
 
@@ -105,7 +87,6 @@ class Metric:
       path,
       desc='',
       labels=dict(),
-      parent=None,
       value=None,
       value_fn=None,
       **kwargs
@@ -117,12 +98,9 @@ class Metric:
     self.reporter = reporter
     self.path = path
     self.desc = desc
-    self.id = _metric_id(path, labels)
     self.labels = labels
-    self.children = set()
     self.kwargs = kwargs
     self.last_sample_at = 0
-    self.parent = parent
     self.value = value
     self.value_fn = value_fn
 
@@ -136,21 +114,6 @@ class Metric:
 
   def _init_metric_(self, **kwargs):
     raise NotImplementedError
-
-  def is_labeled(self):
-    return bool(self.labels)
-
-  def is_parent(self):
-    return bool(self.children)
-
-  def collect(self):
-    if self.is_parent():
-      return
-
-    if self.value_fn:
-      self.value = self.value_fn()
-      self.last_sample_at = time.time()
-    yield self.reading()
 
   def labeled(self, label, label_val):
     new_labels = self.labels.copy()
@@ -180,26 +143,19 @@ class Metric:
     self.value = value
     self.last_sample_at = at
 
-  def readingx(self):
-    return Reading(
-      self.kind,
-      self.path,
-      self.value,
-      self.labels,
-      self.desc,
-      self.last_sample_at
-    )
-
-  def reading(self):
-    return Reading(
-      self.kind,
-      self.path,
-      self.value_2(),
-      self.desc
-    )
-
-  def value_2(self):
+  def to_value(self):
+    if self.value_fn:
+      self.value = self.value_fn()
+      self.last_sample_at = time.time()
     return Value(self.value, self.labels, self.last_sample_at)
+
+  def to_reading(self):
+    return Reading(
+      self.kind,
+      self.path,
+      self.to_value(),
+      self.desc,
+    )
 
   def __repr__(self):
     return f"{self.__class__.__name__}({self.name()}, value={self.peek()})"

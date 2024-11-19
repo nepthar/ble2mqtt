@@ -1,48 +1,61 @@
-from metrics import *
-from metrics.exporters import LinesExporter
+from obs import reporter, default_registry
+from pprint import pp
 
-def test_counters():
-  print("Counter test: ")
-  r = reporter()
+rep = reporter().scoped("test")
 
-  c1 = r.counter('counter1')
-  c2 = r.counter('counter2')
-  c3 = r.counter('counter1')
+c1 = rep.counter("c1")
+c1.inc()
+c1.inc()
 
-  if c1 is not c3:
-    raise Exception("Metric lookup failed")
 
-  c1.inc()
-  c2l = c2.labeled('key', 'value')
+r2 = rep.scoped("inner")
 
-  print(c2l)
-  c2l.inc()
+c2 = r2.counter("test2")
+c3 = r2.counter("test3")
+c2.inc()
 
-  # Gauges
-  g1 = r.scoped('scope1', 'scope2').gauge('mygauge')
+c3l = c3.labeled("key", "value")
+c3l2 = c3.labeled("key", "value2")
 
-  g1.set(4)
+c3l3 = c3l2.labeled("other", "nonsense")
 
-  g2 = g1.labeled('my', 'tacos')
-  g3 = g1.labeled('my', 'other')
 
-  g2.set(44)
-  g3.set(45)
+c3l.inc()
+c3l2.inc()
+c3l3.inc()
 
-  rs = r.scoped('states')
+c3l2.inc()
+c3l3.inc()
 
-  s1 = rs.state('some_state', "This is some state")
-  s2 = rs.state('known_state', "these are known", state='starting', states=['starting', 'ending'])
+def process_readings(readings):
+  if not readings:
+    return None
 
-  s1.set('state1')
-  s2.set('ending')
+  if len(readings) == 1:
+    return readings[0]
 
-  le = LinesExporter()
-  print("\nExport of all metrics:")
-  for line in le.collect():
-    print(line)
 
-  print(r.registry.metrics)
+  # otherwise build our labels
+  reading_dict = {}
+  for r in readings:
+    # Ignore readings without labels here
+    if r.labels:
+      flatkey = r.om_labels()
+      if flatkey:
+        reading_dict[flatkey] = r
 
-if __name__ == "__main__":
-  test_counters()
+  return reading_dict
+
+
+def combine(prefix=()):
+  combined = {}
+  for reading in default_registry().readings(prefix):
+    group_key = reading.group('/')
+    key = reading.flatkey()
+
+    combined.setdefault(group_key, {})
+    combined[group_key][key] = process_readings([reading])
+
+  return combined
+
+pp(combine())
