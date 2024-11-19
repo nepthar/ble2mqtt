@@ -29,6 +29,7 @@ class Ble2Mqtt:
     self.known_devices = config_map["devices"]
     self.metric_path = tuple(config_map.get("metric_path", ()))
 
+    self.mqtt_pub_interval_s = config_map["mqtt_pub_interval_s"]
     self.mqtt_exporter = MqttPublisher(
       broker=config_map["mqtt_broker_addr"],
       username=config_map.get("mqtt_user"),
@@ -37,11 +38,7 @@ class Ble2Mqtt:
       registry=reporter.registry,
     )
 
-    self.mqtt_pub_interval_s = config_map["mqtt_pub_interval_s"]
-
     self.om_server = OpenMetricPublisher(reporter.registry, port=8088)
-
-    # self.queue = asyncio.Queue(maxsize=250)
     self.bs_callback = lambda dev, data: self.on_advertise(dev, data)
 
     ## TODO: Make this NOT per-device?
@@ -59,15 +56,6 @@ class Ble2Mqtt:
     self.unhandled_ctr = self.int_metrics.counter(
       "unhandled", "BLE Beacon data that could not become a metric"
     )
-
-  def _queue_getall(self):
-    ret = []
-    try:
-      while True:
-        ret.append(self.queue.get_nowait())
-        self.queue.task_done()
-    except asyncio.QueueEmpty:
-      return ret
 
   def on_advertise(self, device: BLEDevice, advertisement: AdvertisementData):
     addr = device.address.upper()
@@ -134,7 +122,6 @@ def dump_names(loop):
 
 if __name__ == "__main__":
   from config import CurrentConfig
-  from consumers import MqttPublisher
   import sys
   import signal
 
