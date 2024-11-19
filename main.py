@@ -9,21 +9,11 @@ from obs import reporter
 from consumers import MqttPublisher, OpenMetricPublisher
 
 
-def dig(dict_like, keys):
-  if not keys:
-    return dict_like
-  key = keys[0]
-  if key in dict_like:
-    return dig(dict_like[key], keys[1:])
-
-
 class Ble2Mqtt:
   """
   Listens for BLE broadcasts from devices defined in config.py and
   publishes those to mqtt, providing some deduping and rate limiting
   """
-
-  METRIC_CACHE_SIZE = 10000
 
   @staticmethod
   def adjust_value(val):
