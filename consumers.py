@@ -1,13 +1,9 @@
-from obs import default_registry
-from obs.metric import Reading
-
 import json
 import aiomqtt
-from aiohttp import web
 
+from aiohttp import web
 from enum import Enum, Flag
 
-from pprint import pp
 
 def adjust_value(val):
   match val:

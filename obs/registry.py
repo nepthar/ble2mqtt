@@ -1,9 +1,5 @@
-from enum import Enum
-from dataclasses import dataclass
 from .metric import *
-from typing import Optional
 from threading import RLock
-import time
 
 
 # Canonicalize labels
@@ -147,7 +143,7 @@ class MetricReporter:
     return self._mk_(Gauge, name, desc)
 
   def stat(self, name, desc='', **kwargs):
-    return self_mk_(Stat, name, desc, **kwargs)
+    return self._mk_(Stat, name, desc, **kwargs)
 
   def state(self, name, desc='', state=None, states=set(), **kwargs):
     return self._mk_(State, name, desc, state=state, states=states, **kwargs)
@@ -160,23 +156,23 @@ class NullMetricReporter(MetricReporter):
       path=("null",),
       desc="NullMetric")
 
-  def scoped(*args, **kwargs):
+  def scoped(self, *args, **kwargs):
     return self.null_metric
 
-  def labeled(*args, **kwargs):
+  def labeled(self, *args, **kwargs):
     return self.null_metric
 
-  def counter(*args, **kwargs):
+  def counter(self, *args, **kwargs):
     return self.null_metric
 
-  def gauge(*args, **kwargs):
+  def gauge(self, *args, **kwargs):
     return self.null_metric
 
-  def enum(*args, **kwargs):
+  def enum(self, *args, **kwargs):
     return self.null_metric
 
-  def stat(*args, **kwargs):
+  def stat(self, *args, **kwargs):
     return self.null_metric
 
-  def state(*args, **kwargs):
+  def state(self, *args, **kwargs):
     return self.null_metric

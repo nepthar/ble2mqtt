@@ -1,23 +1,13 @@
 #!/usr/bin/env python3
 import asyncio
-import aiomqtt
-import json
 from enum import Enum, Flag
 from bleak import BleakScanner
 from bleak.backends.device import BLEDevice
 from bleak.backends.scanner import AdvertisementData
 
-from victron_ble.devices.base import OperationMode
-
-from obs import reporter, default_registry
-
+from obs import reporter
 from consumers import MqttPublisher, OpenMetricPublisher
 
-#from obs.exporter import PrometheusExporter, LinesExporter
-
-
-
-from pprint import pp
 
 def dig(dict_like, keys):
   if not keys:
@@ -113,9 +103,9 @@ class Ble2Mqtt:
       match val:
         case float() | int():
           val = round(val, 3)
-          gauge = scoped.gauge(key).set(val)
+          scoped.gauge(key).set(val)
         case Enum() | Flag():
-          state = scoped.state(key).set(val.name.lower())
+          scoped.state(key).set(val.name.lower())
         case _:
           self.unhandled_ctr.inc()
 
@@ -142,7 +132,6 @@ class Ble2Mqtt:
 
 def dump_names(loop):
   def on_advertise(device: BLEDevice, adv: AdvertisementData):
-    addr = device.address.upper()
     if device.name:
       print(f"{device} rssi={adv.rssi}")
 

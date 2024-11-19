@@ -1,4 +1,4 @@
-from .registry import Registry, ThreadsafeRegistry, MetricReporter, NullMetricReporter
+from .registry import Registry, MetricReporter, NullMetricReporter
 
 
 REGISTRY = Registry()

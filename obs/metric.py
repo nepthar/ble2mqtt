@@ -93,7 +93,7 @@ class Metric:
     ):
 
     if not path:
-      raise ArgumentError("Path must not be empty")
+      raise Exception("Path must not be empty")
 
     self.reporter = reporter
     self.path = path
