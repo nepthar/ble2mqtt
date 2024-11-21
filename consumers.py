@@ -1,6 +1,7 @@
 import json
 import aiomqtt
 
+from obs.data import MetricKind
 from aiohttp import web
 from enum import Enum, Flag
 
@@ -13,6 +14,62 @@ def adjust_value(val):
       return val.name.lower()
     case _:
       return val
+
+
+def record_to_om_name(rec):
+  om_name = '_'.join(rec.path.parts)
+  if rec.kind == MetricKind.COUNTER and not om_name.endswith('_total'):
+    om_name = om_name + "_total"
+  return om_name
+
+
+def record_to_om_string(rec):
+  om_name = record_to_om_name(rec)
+  value = str(rec.value)
+  ts = f" {round(rec.at)}" if rec.at > 1 else ""
+  labels = rec.labels
+
+  match rec.kind:
+    case MetricKind.COUNTER:
+      pass
+    case MetricKind.GAUGE:
+      pass
+    case MetricKind.STATE:
+      labels = labels.labeled('state', value)
+      value = "1"
+    case MetricKind.STAT:
+      pass
+    case MetricKind.INFO:
+      for k, v in rec.items():
+        labels = labels.labeled(k, v)
+      value = "1"
+    case _ :
+      pass
+
+  labels_part = labels.as_str()
+
+  return ''.join((om_name, labels_part, ' ', value, ts))
+
+def record_to_om_help(rec):
+  return f"# HELP {rec.desc}"
+
+def record_to_om_type(rec):
+  typestr = 'unknown'
+  match rec.kind:
+    case MetricKind.COUNTER:
+      typestr = "counter"
+    case MetricKind.GAUGE:
+      typestr = "gauge"
+    case MetricKind.STATE:
+      typestr = "stateset"
+    case MetricKind.STAT:
+      typestr = "histogram"
+    case MetricKind.INFO:
+      typestr = "info"
+    case _ :
+      pass
+
+  return f"# TYPE {typestr}"
 
 
 class MqttPublisher:
@@ -28,7 +85,7 @@ class MqttPublisher:
   async def publish(self):
     to_publish = {}
     for r in self.registry.readings(self.prefix):
-      group = r.group("/")
+      group = '/'.join(r.dir())
       key = r.flatkey()
 
       to_publish.setdefault(group, {})
@@ -42,16 +99,22 @@ class MqttPublisher:
 
 
 class OpenMetricPublisher:
-  def __init__(self, registry, aiohttp_app=web.Application(), port=8088):
+  def __init__(self,
+      registry,
+      aiohttp_app=web.Application(),
+      port=8088,
+      inc_help_type=False
+    ):
     self.registry = registry
     self.port = port
     self.app = aiohttp_app
     self.runner = None
+    self.extras = inc_help_type
 
     async def handle_stats(request):
       return web.Response(text="\n".join(self.collect_lines()))
 
-    self.app.add_routes([web.get("/stats", handle_stats)])
+    self.app.add_routes([web.get('/stats', handle_stats)])
 
   def setup(self, loop):
     # set up aiohttp - like run_app, but non-blocking
@@ -64,4 +127,4 @@ class OpenMetricPublisher:
     await self.runner.cleanup()
 
   def collect_lines(self):
-    return (r.om_str() for r in self.registry.readings())
+    return (record_to_om_string(r) for r in self.registry.readings())

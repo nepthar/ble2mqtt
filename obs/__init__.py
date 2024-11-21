@@ -1,17 +1,7 @@
-from .registry import Registry, MetricReporter, NullMetricReporter
-
+from .registry import MetricReporter, Registry
 
 REGISTRY = Registry()
-NULL_REPORTER = NullMetricReporter()
-
-
-def default_registry():
-  return REGISTRY
-
+REPORTER = MetricReporter(REGISTRY)
 
 def reporter():
-  return MetricReporter(REGISTRY)
-
-
-def null_reporter():
-  return NULL_REPORTER
+  return REPORTER

@@ -1,67 +1,9 @@
 import time
 from enum import Enum
 from dataclasses import dataclass
+from collections import namedtuple
 
-
-class MetricKind(Enum):
-  COUNTER = 1
-  GAUGE = 2
-  STATE = 3
-  STAT = 4
-  INFO = 5
-
-
-@dataclass
-class Value:
-  value: any
-  labels: dict[str, str]
-  at: float
-
-
-@dataclass
-class Reading:
-  kind: MetricKind
-  path: tuple[str]
-  val: Value
-  desc: str
-
-  @property
-  def value(self):
-    return self.val.value
-
-  @property
-  def labels(self):
-    return self.val.labels
-
-  @property
-  def at(self):
-    return self.val.at
-
-  def group(self, join_char=None):
-    return join_char.join(self.path[:-1]) if join_char else self.path[:-1]
-
-  def flatkey(self):
-    oml = self.om_labels()
-    name = self.path[-1]
-    return name + "".join(["{", oml, "}"]) if oml else name
-
-  def om_labels(self):
-    """OpenMetrics representation of the labels"""
-    return ", ".join(f'{k}="{v}"' for k, v in sorted(self.labels.items()))
-
-  def om_help(self):
-    """OpenMetrics render of the help with this reading"""
-    return f"# HELP {self.desc}"
-
-  def om_str(self):
-    """OpenMetrics rendering of this reading"""
-    parts = [self.group("_"), "_", self.flatkey(), " ", str(self.value)]
-    if self.val.at:
-      parts.append(" ")
-      parts.append(str(round(self.val.at)))
-
-    return "".join(parts)
-
+from .data import Reading, Value, Labels, Path, MetricKind
 
 class Metric:
   __slots__ = (
@@ -102,14 +44,13 @@ class Metric:
       self.set(value)
 
   def name(self):
-    return self.path[-1]
+    return self.path.name()
 
   def _init_metric_(self, **kwargs):
     raise NotImplementedError
 
   def labeled(self, label, label_val):
-    new_labels = self.labels.copy()
-    new_labels[label] = label_val
+    new_labels = self.labels.labeled(label, label_val)
     return self.reporter.with_labels(self, new_labels)
 
   def peek(self):

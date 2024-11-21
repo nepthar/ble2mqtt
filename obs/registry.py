@@ -1,27 +1,12 @@
 from .metric import *
+from .data import Value, Reading, Labels, Path
 from threading import RLock
-
-
-# Canonicalize labels
-def label_id(label_dict):
-  return tuple(sorted(label_dict.items())) if label_dict else ()
-
-
-def list_starts_with(lst, prefix_lst):
-  if len(lst) < len(prefix_lst):
-    return False
-
-  for i in range(len(prefix_lst)):
-    if lst[i] != prefix_lst[i]:
-      return False
-
-  return True
 
 
 class Registry:
   def __init__(self):
     # stored as: :
-    # { (the, path): { (): Metric, (label1, lablevalue1): Metric }
+    # { Path(the, path): { (): Metric, (label1, lablevalue1): Metric }
     # That is, `metrics` is a dict of dicts, where the key for the first
     # is the metric path, and the key for the second is the metric labels,
     # sorted and turned into a tuple of tuple (k, v).
@@ -31,8 +16,7 @@ class Registry:
     if path not in self.metrics:
       self.metrics[path] = {}
 
-    l_id = label_id(labels)
-    metric = self.metrics[path].get(l_id)
+    metric = self.metrics[path].get(labels)
 
     if metric:
       if klass != metric.__class__:
@@ -41,47 +25,35 @@ class Registry:
 
     metric = klass(reporter=reporter, path=path, desc=desc, labels=labels, **kwargs)
 
-    self.metrics[path][l_id] = metric
+    self.metrics[path][labels] = metric
     return metric
 
-  def _items_(self, path_filter):
-    keys = self.metrics.keys()
-    lenpf = len(path_filter)
+  def _items_(self, prefix):
+    paths = sorted(self.metrics.keys())
+    if prefix:
+      prefix = Path.make(prefix)
+      for p in paths:
+        if p.startswith(prefix):
+          yield (p.lstripped(prefix), self.metrics[p])
+    else:
+      for p in paths:
+        yield (p, self.metrics[p])
 
-    if path_filter:
-
-      def include(key):
-        lk = len(key)
-        if lk < lenpf:
-          return False
-        for i in range(lenpf):
-          if key[i] != path_filter[i]:
-            return False
-        return True
-
-      keys = filter(include, keys)
-
-    # Guarantee sorted items
-    for key in sorted(keys):
-      # Remove the prefix given by the filter
-      path = key[lenpf:]
-      yield (path, self.metrics[key])
-
-  def readings(self, path_filter=()):
-    for _, mgroup in self._items_(path_filter):
+  def readings(self, prefix=None):
+    for _, mgroup in self._items_(prefix):
       for metric in mgroup.values():
         # Skip the "unlabeled" metric in a labeled group
         if len(mgroup) > 1 and not metric.labels:
           continue
         yield metric.to_reading()
 
-  def readings_groups(self, path_filter=()):
-    for path, mgroup in self._items_(path_filter):
+  def readings_groups(self, prefix=None):
+    for path, mgroup in self._items_(prefix):
       yield (path, [v.to_reading() for v in mgroup.values()])
 
-  def readings_tree(self, path_filter=()):
+  def readings_tree(self, prefix=None):
     tree = {}
-    for path, mgroup in self._items_(path_filter):
+    for path, mgroup in self._items_(prefix):
       current_level = tree
       for key in path[:-1]:
         # Ensure the "path" exists in the tree structure
@@ -99,34 +71,34 @@ class ThreadsafeRegistry:
     with self.lock:
       return self._reg.find_or_create(klass, reporter, path, desc, labels, **kwargs)
 
-  def _items_(self, path_filter=()):
+  def _items_(self, prefix=()):
     # Materialize items into a list right away and release the lock
     with self.lock:
-      return list(self._reg._items_(path_filter))
+      return list(self._reg._items_(prefix))
 
 
 class MetricReporter:
-  def __init__(self, registry, path=()):
-    self.path = path
+  def __init__(self, registry, path=Path(())):
+    self.path = Path.make(path)
     self.registry = registry
 
-  def _mk_(self, klass, name, desc, labels=dict(), **kwargs):
+  def _mk_(self, klass, name, desc, labels=Labels.Empty, **kwargs):
     return self.registry.find_or_create(
       klass=klass,
       reporter=self,
-      path=self.path + (name,),
+      path=self.path.plus(name),
       desc=desc,
       labels=labels,
       **kwargs,
     )
 
   def scoped(self, *new_path):
-    return MetricReporter(self.registry, self.path + tuple(new_path))
+    return MetricReporter(self.registry, self.path.plus(*new_path))
 
   def with_labels(self, metric, labels):
     return self._mk_(
       klass=metric.__class__,
-      name=metric.path[-1],
+      name=metric.path.name(),
       desc=metric.desc,
       labels=labels,
       **metric.kwargs,
@@ -147,7 +119,7 @@ class MetricReporter:
 
 class NullMetricReporter(MetricReporter):
   def __init__(self):
-    self.null_metric = NullMetric(reporter=self, path=("null",), desc="NullMetric")
+    self.null_metric = NullMetric(reporter=self, path=Path.make("null"), desc="NullMetric")
 
   def scoped(self, *args, **kwargs):
     return self.null_metric
