@@ -88,7 +88,7 @@ class MqttPublisher:
   async def publish(self):
     prefix_str = "/".join(self.prefix)
     readings = self.registry.read(
-      prefix=self.prefix,
+    #  prefix=self.prefix,
       after=self.last_publish_at
     ).as_dict()
 
