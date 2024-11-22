@@ -16,16 +16,19 @@ class MetricKind(Enum):
 class Path:
 
   @staticmethod
-  def make(tuple_or_path):
-    match tuple_or_path:
+  def of(x):
+    match x:
       case Path():
-        return tuple_or_path
+        return x
       case tuple():
-        return Path(tuple_or_path)
+        return Path(x)
       case str():
-        return Path((tuple_or_path,))
+        return Path((x,))
+      case None:
+        return Path.Root
       case _:
-        raise ValueError(f"Cannot make a Path from {tuple_or_path}")
+        raise ValueError(f"Cannot make a Path from {x}")
+    return
 
   # TODO: Some kind of validation?
 
@@ -47,16 +50,16 @@ class Path:
     return self.parts.__iter__()
 
   def name(self):
-    return self.parts[-1]
+    return self.parts[-1] if self.parts else ""
 
   def dir(self):
     return Path(tuple(self.parts[:-1]))
 
   def startswith(self, other):
-    other = Path.make(other)
-    l_other = len(other.parts)
-    if l_other == 0:
+    if not other:
       return True
+
+    l_other = len(other.parts)
 
     if l_other > len(self.parts):
       return False
@@ -68,7 +71,6 @@ class Path:
     return True
 
   def lstripped(self, prefix):
-
     if self.startswith(prefix):
       lp = len(prefix.parts)
       return Path(self.parts[lp:])
@@ -76,6 +78,10 @@ class Path:
 
   def to_str(self, joiner='/'):
     return joiner.join(self.parts)
+
+  def __repr__(self):
+    return f'P({self.to_str()})'
+
 
 Path.Root = Path(())
 
@@ -148,8 +154,8 @@ class Reading:
   def dir(self):
     return self.path.dir()
 
-  def flatkey(self):
-    """ The "Key" of this metric, with the labels flattened into it """
+  def om_name(self):
+    """ The "Key" of this metric, with the labels if any """
     oml = self.om_labels()
     name = self.path.name()
     return name + "".join(["{", oml, "}"]) if oml else name
@@ -160,7 +166,7 @@ class Reading:
 
   def om_str(self):
     """OpenMetrics rendering of this reading"""
-    parts = [self.group("_"), "_", self.flatkey(), " ", str(self.value)]
+    parts = [self.group("_"), "_", self.om_name(), " ", str(self.value)]
     if self.val.at:
       parts.append(" ")
       parts.append(str(round(self.val.at)))

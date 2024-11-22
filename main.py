@@ -4,6 +4,7 @@ from enum import Enum, Flag
 from bleak import BleakScanner
 from bleak.backends.device import BLEDevice
 from bleak.backends.scanner import AdvertisementData
+import time
 
 from obs import reporter
 from consumers import MqttPublisher, OpenMetricPublisher
@@ -75,14 +76,15 @@ class Ble2Mqtt:
     self.bc_i.inc()
 
   def update_metrics_from_readings(self, devname, readings):
+    when = time.time()
     scoped = self.reporter.scoped(devname)
     for key, val in readings.items():
       match val:
         case float() | int():
           val = round(val, 3)
-          scoped.gauge(key).set(val)
+          scoped.gauge(key).set(val, when)
         case Enum() | Flag():
-          scoped.state(key).set(val.name.lower())
+          scoped.state(key).set(val.name.lower(), when)
         case _:
           self.unhandled_ctr.inc()
 

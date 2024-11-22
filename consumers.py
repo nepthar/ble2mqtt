@@ -4,7 +4,9 @@ import aiomqtt
 from obs.data import MetricKind
 from aiohttp import web
 from enum import Enum, Flag
+import time
 
+from pprint import pp
 
 def adjust_value(val):
   match val:
@@ -81,21 +83,34 @@ class MqttPublisher:
       password=password,
     )
     self.prefix = prefix
+    self.last_publish_at = 0
 
   async def publish(self):
-    to_publish = {}
-    for r in self.registry.readings(self.prefix):
-      group = '/'.join(r.dir())
-      key = r.flatkey()
+    prefix_str = "/".join(self.prefix)
+    readings = self.registry.read(
+      prefix=self.prefix,
+      after=self.last_publish_at
+    ).as_dict()
 
-      to_publish.setdefault(group, {})
-      to_publish[group][key] = adjust_value(r.value)
+    pp(readings)
 
-    rendered = [(k, json.dumps(v)) for k, v in to_publish.items()]
+    print("\n")
 
-    async with self.mqtt_client as mqtt:
-      for key, payload in rendered:
-        await mqtt.publish(key, payload=payload)
+    self.last_publish_at = time.time()
+
+
+
+    # rendered = []
+    # for path, group in readings.items():
+    #   pathstr = '/'.join(path)
+    #   for k in group.keys():
+    #     group[k] = adjust_value(group[k].value)
+
+    #   rendered.append((prefix_str + pathstr, json.dumps(group)))
+
+    # async with self.mqtt_client as mqtt:
+    #   for key, payload in rendered:
+    #     await mqtt.publish(key, payload=payload)
 
 
 class OpenMetricPublisher:

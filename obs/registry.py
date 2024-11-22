@@ -1,6 +1,37 @@
 from .metric import *
 from .data import Value, Reading, Labels, Path
 from threading import RLock
+import time
+
+class Readings:
+  def __init__(self, items, at=time.time()):
+    self.items = items
+    self.at = at
+
+  def filtered(self, prefix):
+    pp = Path.of(prefix)
+    new_items = tuple(
+      Reading(
+        kind=r.kind,
+        path=r.path.lstripped(r.path),
+        val=r.val,
+        desc=r.desc
+      ) for r in self.items if r.path.startswith(pp)
+    )
+    return Readings(items=new_items, at=self.at)
+
+  def as_dict(self):
+    ret = {}
+    for r in self.items:
+      group = r.dir()
+      key = r.om_name()
+      ret.setdefault(group, {})
+      ret[group][key] = r
+
+    return ret
+
+  def __iter__(self):
+    return self.items.__iter__()
 
 
 class Registry:
@@ -28,38 +59,26 @@ class Registry:
     self.metrics[path][labels] = metric
     return metric
 
-  def _items_(self, prefix):
-    paths = sorted(self.metrics.keys())
-    if prefix:
-      prefix = Path.make(prefix)
-      for p in paths:
-        if p.startswith(prefix):
-          yield (p.lstripped(prefix), self.metrics[p])
-    else:
-      for p in paths:
-        yield (p, self.metrics[p])
+  def read(self, prefix=None, after=0):
+    return Readings(tuple(self._read_iter_(prefix, after)))
 
-  def readings(self, prefix=None):
-    for _, mgroup in self._items_(prefix):
-      for metric in mgroup.values():
-        # Skip the "unlabeled" metric in a labeled group
-        if len(mgroup) > 1 and not metric.labels:
-          continue
-        yield metric.to_reading()
-
-  def readings_groups(self, prefix=None):
-    for path, mgroup in self._items_(prefix):
-      yield (path, [v.to_reading() for v in mgroup.values()])
-
-  def readings_tree(self, prefix=None):
-    tree = {}
-    for path, mgroup in self._items_(prefix):
-      current_level = tree
-      for key in path[:-1]:
-        # Ensure the "path" exists in the tree structure
-        current_level = current_level.setdefault(key, {})
-      current_level[path[-1]] = [m.to_reading() for m in mgroup.values()]
-    return tree
+  def _read_iter_(self, prefix, after):
+    """ Create an interator of all readings with options to filter by
+        path prefix, timestamp or both
+    """
+    ppfx = Path.of(prefix)
+    for path, group in sorted(self.metrics.items()):
+      if path.startswith(ppfx):
+        for metric in group.values():
+          if metric.value_fn:
+            metric.update()
+          if metric.last_sample_at > after:
+            yield Reading(
+              kind=metric.kind,
+              path=path.lstripped(ppfx),
+              val=metric.to_value(),
+              desc=metric.desc
+            )
 
 
 class ThreadsafeRegistry:
@@ -71,15 +90,15 @@ class ThreadsafeRegistry:
     with self.lock:
       return self._reg.find_or_create(klass, reporter, path, desc, labels, **kwargs)
 
-  def _items_(self, prefix=()):
+  def read(self):
     # Materialize items into a list right away and release the lock
     with self.lock:
-      return list(self._reg._items_(prefix))
+      return self._reg.read()
 
 
 class MetricReporter:
   def __init__(self, registry, path=Path(())):
-    self.path = Path.make(path)
+    self.path = Path.of(path)
     self.registry = registry
 
   def _mk_(self, klass, name, desc, labels=Labels.Empty, **kwargs):
@@ -119,7 +138,7 @@ class MetricReporter:
 
 class NullMetricReporter(MetricReporter):
   def __init__(self):
-    self.null_metric = NullMetric(reporter=self, path=Path.make("null"), desc="NullMetric")
+    self.null_metric = NullMetric(reporter=self, path=Path.of("null"), desc="NullMetric")
 
   def scoped(self, *args, **kwargs):
     return self.null_metric

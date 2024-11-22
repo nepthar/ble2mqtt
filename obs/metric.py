@@ -40,14 +40,11 @@ class Metric:
 
     self._init_metric_(**kwargs)
 
-    if value:
-      self.set(value)
-
   def name(self):
     return self.path.name()
 
   def _init_metric_(self, **kwargs):
-    raise NotImplementedError
+    pass
 
   def labeled(self, label, label_val):
     new_labels = self.labels.labeled(label, label_val)
@@ -72,23 +69,18 @@ class Metric:
     self.value_fn = value_fn
 
   def set(self, value, at=time.time()):
+    print(f"set {self.name()}")
     assert self.value_fn is None, "Cannot set a metric with a value_fn"
     self.value = value
     self.last_sample_at = at
 
-  def to_value(self):
-    if self.value_fn:
-      self.value = self.value_fn()
-      self.last_sample_at = time.time()
-    return Value(self.value, self.labels, self.last_sample_at)
+  def update(self, at=time.time()):
+    assert self.value_fn is not None, "Cannot update a metric without a value_fn"
+    self.value = self.value_fn()
+    self.last_sample_at = at
 
-  def to_reading(self):
-    return Reading(
-      self.kind,
-      self.path,
-      self.to_value(),
-      self.desc,
-    )
+  def to_value(self):
+    return Value(self.value, self.labels, self.last_sample_at)
 
   def __repr__(self):
     return f"{self.__class__.__name__}({self.name()}, value={self.peek()})"
@@ -111,51 +103,43 @@ class Metric:
 class Counter(Metric):
   kind = MetricKind.COUNTER
 
-  def _init_metric_(self, value=0, **kwargs):
-    self.value = value
+  def _init_metric_(self, **kwargs):
+    if self.value is None:
+      self.value = 0
 
   def set_fn(self, value_fn):
     raise NotImplementedError("Counters do not use functions")
 
-  def inc(self, amt=1):
-    self.last_sample_at = time.time()
+  def inc(self, amt=1, at=time.time()):
+    self.last_sample_at = at
     self.value += amt
 
 
 class Gauge(Metric):
   kind = MetricKind.GAUGE
 
-  def _init_metric_(self, value=0.0, value_fn=None, **kwargs):
-    self.value = value
-    self.value_fn = value_fn
+  def inc(self, amt=1.0, at=time.time()):
+    self.set(self.value + amt, at)
 
-  def inc(self, amt=1.0):
-    self.set(self.value + amt)
-
-  def dec(self, amt=1.0):
-    self.set(self.value - amt)
+  def dec(self, amt=1.0, at=time.time()):
+    self.set(self.value - amt, at)
 
 
 class State(Metric):
   kind = MetricKind.STATE
 
-  def _init_metric_(self, states=[], value=None, **kwargs):
-    self.value = None
+  def _init_metric_(self, states=[], **kwargs):
     self.states = set(states)
     self.restrict = bool(states)
 
-    if value:
-      self.set(value)
-
-  def set(self, new_state):
+  def set(self, new_state, at=time.time()):
     assert isinstance(new_state, str)
 
     if self.restrict and new_state not in self.states:
       raise Exception(f"State {new_state} is not in {self.states}")
 
-    self.value = new_state
     self.states.add(new_state)
-    self.last_sample_at = time.time()
+    super().set(new_state, at)
 
 
 class Stat(Metric):
