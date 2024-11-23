@@ -88,29 +88,23 @@ class MqttPublisher:
   async def publish(self):
     prefix_str = "/".join(self.prefix)
     readings = self.registry.read(
-    #  prefix=self.prefix,
+      prefix=self.prefix,
       after=self.last_publish_at
     ).as_dict()
 
-    pp(readings)
-
-    print("\n")
-
     self.last_publish_at = time.time()
 
+    rendered = []
+    for group, values in readings.items():
+      path_str = f"{prefix_str}/" + "/".join(group)
+      for k in values.keys():
+        values[k] = adjust_value(values[k].value)
 
+      rendered.append((path_str, json.dumps(values)))
 
-    # rendered = []
-    # for path, group in readings.items():
-    #   pathstr = '/'.join(path)
-    #   for k in group.keys():
-    #     group[k] = adjust_value(group[k].value)
-
-    #   rendered.append((prefix_str + pathstr, json.dumps(group)))
-
-    # async with self.mqtt_client as mqtt:
-    #   for key, payload in rendered:
-    #     await mqtt.publish(key, payload=payload)
+    async with self.mqtt_client as mqtt:
+      for key, payload in rendered:
+        await mqtt.publish(key, payload=payload)
 
 
 class OpenMetricPublisher:
@@ -118,7 +112,8 @@ class OpenMetricPublisher:
       registry,
       aiohttp_app=web.Application(),
       port=8088,
-      inc_help_type=False
+      inc_help_type=True,
+      om_strict=True
     ):
     self.registry = registry
     self.port = port
@@ -127,11 +122,11 @@ class OpenMetricPublisher:
     self.extras = inc_help_type
 
     async def handle_stats(request):
-      return web.Response(text="\n".join(self.collect_lines()))
+      return web.Response(text="\n".join(self.collect()))
 
     self.app.add_routes([web.get('/stats', handle_stats)])
 
-  def setup(self, loop):
+  def setup_aiohttp(self, loop):
     # set up aiohttp - like run_app, but non-blocking
     runner = web.AppRunner(self.app)
     loop.run_until_complete(runner.setup())
@@ -141,5 +136,16 @@ class OpenMetricPublisher:
   async def stop(self):
     await self.runner.cleanup()
 
-  def collect_lines(self):
-    return (record_to_om_string(r) for r in self.registry.readings())
+  def collect(self):
+    readings = self.registry.read()
+    prev_path = None
+    for r in readings:
+      # Output the TYPE/HELP if this is the first of this thing's path
+      if self.extras:
+        if prev_path != r.path:
+          yield record_to_om_type(r)
+          if r.desc:
+            yield record_to_om_help(r)
+
+      prev_path = r.path
+      yield record_to_om_string(r)

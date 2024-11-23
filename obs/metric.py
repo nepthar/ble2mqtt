@@ -69,7 +69,6 @@ class Metric:
     self.value_fn = value_fn
 
   def set(self, value, at=time.time()):
-    print(f"set {self.name()}")
     assert self.value_fn is None, "Cannot set a metric with a value_fn"
     self.value = value
     self.last_sample_at = at

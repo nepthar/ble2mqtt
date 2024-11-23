@@ -16,16 +16,6 @@ class Ble2Mqtt:
   publishes those to mqtt, providing some deduping and rate limiting
   """
 
-  @staticmethod
-  def adjust_value(val):
-    match val:
-      case float():
-        return round(val, 2)
-      case Enum():
-        return val.name
-      case _:
-        return val
-
   def __init__(self, config_map, reporter=reporter()):
     self.known_devices = config_map["devices"]
     self.metric_path = tuple(config_map.get("metric_path", ()))
@@ -99,7 +89,7 @@ class Ble2Mqtt:
         await self.mqtt_exporter.publish()
 
     loop.create_task(scan())
-    self.om_server.setup(loop)
+    self.om_server.setup_aiohttp(loop)
 
     loop.create_task(export_mqtt())
 

@@ -155,7 +155,7 @@ class Reading:
     return self.path.dir()
 
   def om_name(self):
-    """ The "Key" of this metric, with the labels if any """
+    """ The "name" of this metric, with the labels if any """
     oml = self.om_labels()
     name = self.path.name()
     return name + "".join(["{", oml, "}"]) if oml else name
@@ -163,12 +163,3 @@ class Reading:
   def om_labels(self):
     """OpenMetrics representation of the labels"""
     return ", ".join(f'{k}="{v}"' for k, v in self.labels)
-
-  def om_str(self):
-    """OpenMetrics rendering of this reading"""
-    parts = [self.group("_"), "_", self.om_name(), " ", str(self.value)]
-    if self.val.at:
-      parts.append(" ")
-      parts.append(str(round(self.val.at)))
-
-    return "".join(parts)
