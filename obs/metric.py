@@ -48,7 +48,16 @@ class Metric:
 
   def labeled(self, label, label_val):
     new_labels = self.labels.labeled(label, label_val)
-    return self.reporter.with_labels(self, new_labels)
+    if self.labels == new_labels:
+      return self
+
+    return self.reporter._mk_(
+      klass=self.__class__,
+      name=self.name(),
+      desc=self.desc,
+      labels=new_labels,
+      **kwargs
+    )
 
   def peek(self):
     """Peek at the value of this metric. Sometimes this is not possible
@@ -58,7 +67,7 @@ class Metric:
       return self.value
 
     if self.value_fn:
-      return "fn()"
+      return f"fn()->{self.value}"
 
     return "n/a"
 

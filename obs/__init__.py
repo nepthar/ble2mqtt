@@ -1,8 +1,9 @@
-from .registry import MetricReporter, Registry
+from .registry import Registry
+from .observer import Observer
 from time import time
 
 REGISTRY = Registry()
-REPORTER = MetricReporter(REGISTRY)
+REPORTER = Observer(REGISTRY)
 
 REPORTER.gauge(
   "started_s", desc="Unix epoch timestamp of module initialization"

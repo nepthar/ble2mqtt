@@ -42,6 +42,10 @@ class Registry:
     # is the metric path, and the key for the second is the metric labels,
     # sorted and turned into a tuple of tuple (k, v).
     self.metrics = dict()
+    self.logs = dict()
+
+  def find_or_create_log(self):
+    pass
 
   def find_or_create(self, klass, reporter, path, desc, labels, **kwargs):
     if path not in self.metrics:
@@ -95,68 +99,3 @@ class ThreadsafeRegistry:
     with self.lock:
       return self._reg.read()
 
-
-class MetricReporter:
-  def __init__(self, registry, path=Path(())):
-    self.path = Path.of(path)
-    self.registry = registry
-
-  def _mk_(self, klass, name, desc, labels=Labels.Empty, **kwargs):
-    return self.registry.find_or_create(
-      klass=klass,
-      reporter=self,sd
-      path=self.path.plus(name),
-      desc=desc,
-      labels=labels,
-      **kwargs,
-    )
-
-  def scoped(self, *new_path):
-    return MetricReporter(self.registry, self.path.plus(*new_path))
-
-  def with_labels(self, metric, labels):
-    return self._mk_(
-      klass=metric.__class__,
-      name=metric.path.name(),
-      desc=metric.desc,
-      labels=labels,
-      **metric.kwargs,
-    )
-
-  def counter(self, name, desc=""):
-    return self._mk_(Counter, name, desc)
-
-  def gauge(self, name, desc=""):
-    return self._mk_(Gauge, name, desc)
-
-  def stat(self, name, desc="", **kwargs):
-    return self._mk_(Stat, name, desc, **kwargs)
-
-  def state(self, name, desc="", state=None, states=set(), **kwargs):
-    return self._mk_(State, name, desc, state=state, states=states, **kwargs)
-
-
-class NullMetricReporter(MetricReporter):
-  def __init__(self):
-    self.null_metric = NullMetric(reporter=self, path=Path.of("null"), desc="NullMetric")
-
-  def scoped(self, *args, **kwargs):
-    return self.null_metric
-
-  def labeled(self, *args, **kwargs):
-    return self.null_metric
-
-  def counter(self, *args, **kwargs):
-    return self.null_metric
-
-  def gauge(self, *args, **kwargs):
-    return self.null_metric
-
-  def enum(self, *args, **kwargs):
-    return self.null_metric
-
-  def stat(self, *args, **kwargs):
-    return self.null_metric
-
-  def state(self, *args, **kwargs):
-    return self.null_metric
