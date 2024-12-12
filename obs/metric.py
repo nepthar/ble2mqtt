@@ -3,9 +3,80 @@ from enum import Enum
 from dataclasses import dataclass
 from collections import namedtuple
 
-from .data import Reading, Value, Labels, Path, MetricKind
+from .data import Reading, ObsKey, MetricKind
+
 
 class Metric:
+
+  kind: MetricKind = MetricKind.UNKNOWN
+
+  __slots__ = (
+    "key",
+    "value",
+    "value_fn",
+    "last_sample_at",
+    "observer",
+    "kwargs",
+  )
+
+  def __init__(
+    self, key, observer, desc="", value=None, value_fn=None, **kwargs
+  ):
+    self.obs = observer
+    self.key = key
+    self.desc = desc
+    self.kwargs = kwargs
+    self.value = value
+    self.value_fn = value_fn
+    self.last_sample_at = 0
+
+    self._init_metric_(**kwargs)
+
+  def _init_metric_(self, **kwargs):
+    pass
+
+  def labeled(self, lname, lval):
+    new_key = self.key.labeled(lname, lval)
+    return self.obs.registry.find_or_create(
+      klass=self.__class__,
+      key=new_key,
+      obs=self.obs,
+      desc=self.desc,
+      **self.kwargs
+    )
+
+  def peek(self):
+    """Peek at the value of this metric. Sometimes this is not possible
+    Like in histograms, etc.
+    """
+    if self.last_sample_at:
+      if self.value:
+        return self.value
+
+      if self.value_fn:
+        return f"fn()->{self.value}"
+
+    return "n/a"
+
+  def set_fn(self, value_fn):
+    """Have this metric use `value_fn` to retrieve the value when collected"""
+    assert self.last_sample_at == 0, "Cannot set a function once a metric has been used"
+    self.last_sample_at = 0
+    self.value_fn = value_fn
+
+  def set(self, value, at=time.time()):
+    assert self.value_fn is None, "Cannot set a metric with a value_fn"
+    self.value = value
+    self.last_sample_at = at
+
+  def update(self, at=time.time()):
+    assert self.value_fn is not None, "Cannot update a metric without a value_fn"
+    self.value = self.value_fn()
+    self.last_sample_at = at
+
+
+
+class MetricOld:
   __slots__ = (
     "path",
     "desc",
@@ -87,8 +158,8 @@ class Metric:
     self.value = self.value_fn()
     self.last_sample_at = at
 
-  def to_value(self):
-    return Value(self.value, self.labels, self.last_sample_at)
+  # def to_value(self):
+  #   return Value(self.value, self.labels, self.last_sample_at)
 
   def __repr__(self):
     return f"{self.__class__.__name__}({self.name()}, value={self.peek()})"
@@ -96,13 +167,13 @@ class Metric:
   def __str__(self):
     return self.__repr__()
 
-  def __lt__(self, other):
-    if self.path < other.path:
-      return True
-    elif self.path == other.path:
-      return tuple(self.labels.keys()) < tuple(other.labels.keys())
-    else:  # self.path > other.path
-      return False
+  # def __lt__(self, other):
+  #   if self.path < other.path:
+  #     return True
+  #   elif self.path == other.path:
+  #     return tuple(self.labels.keys()) < tuple(other.labels.keys())
+  #   else:  # self.path > other.path
+  #     return False
 
   def __eq__(self, other):
     return self.path == other.path and self.labels == other.labels
@@ -151,6 +222,7 @@ class State(Metric):
 
 
 class Stat(Metric):
+  kind = MetricKind.STAT
   pass
 
 
@@ -174,6 +246,9 @@ class NullMetric(Metric):
 
   def rec(*args, **kwargs):
     pass
+
+  def get(self):
+    return (None, 0)
 
   def collect(self):
     yield from ()

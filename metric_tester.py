@@ -1,7 +1,7 @@
-from obs import reporter, default_registry
+from obs import observer
 from pprint import pp
 
-rep = reporter().scoped("test")
+rep = observer().scoped("test")
 
 c1 = rep.counter("c1")
 c1.inc()
@@ -27,36 +27,43 @@ c3l3.inc()
 c3l2.inc()
 c3l3.inc()
 
+log = rep.log('hi')
 
-def process_readings(readings):
-  if not readings:
-    return None
+log.inf("hello there")
+log.dbg("debug me")
 
-  if len(readings) == 1:
-    return readings[0]
+pp(observer().registry.collect().as_dict())
 
-  # otherwise build our labels
-  reading_dict = {}
-  for r in readings:
-    # Ignore readings without labels here
-    if r.labels:
-      flatkey = r.om_labels()
-      if flatkey:
-        reading_dict[flatkey] = r
+# def process_readings(readings):
+#   if not readings:
+#     return None
 
-  return reading_dict
+#   if len(readings) == 1:
+#     return readings[0]
 
+#   # otherwise build our labels
+#   reading_dict = {}
+#   for r in readings:
+#     # Ignore readings without labels here
+#     if r.labels:
+#       flatkey = r.om_labels()
+#       if flatkey:
+#         reading_dict[flatkey] = r
 
-def combine(prefix=()):
-  combined = {}
-  for reading in default_registry().readings(prefix):
-    group_key = reading.group("/")
-    key = reading.flatkey()
-
-    combined.setdefault(group_key, {})
-    combined[group_key][key] = process_readings([reading])
-
-  return combined
+#   return reading_dict
 
 
-pp(combine())
+# def combine(prefix=()):
+#   combined = {}
+#   for reading in default_registry().readings(prefix):
+#     group_key = reading.group("/")
+#     key = reading.flatkey()
+
+#     combined.setdefault(group_key, {})
+#     combined[group_key][key] = process_readings([reading])
+
+#   return combined
+
+
+# pp(combine())
+

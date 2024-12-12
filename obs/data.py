@@ -3,6 +3,7 @@ from enum import Enum
 
 
 class MetricKind(Enum):
+  LOG = 0
   COUNTER = 1
   GAUGE = 2
   STATE = 3
@@ -11,155 +12,118 @@ class MetricKind(Enum):
   GROUP = 6
   UNKNOWN = 7
 
-
-@dataclass(frozen=True)
-class Path:
-
-  @staticmethod
-  def of(x):
+def to_scope(x):
+  if x:
     match x:
-      case Path():
+      case tuple() if all(isinstance(i, str) for i in x):
         return x
-      case tuple():
-        return Path(x)
       case str():
-        return Path((x,))
+        return (x,)
       case None:
-        return Path.Root
-      case _:
-        raise ValueError(f"Cannot make a Path from {x}")
-    return
+        return ()
 
-  # TODO: Some kind of validation?
+    raise ValueError(f"Cannot make a scope path from {x}")
+  else:
+    return ()
 
-  parts: tuple[str]
 
-  def plus(self, *others):
-    if others:
-      return Path(self.parts + tuple(others))
-    else:
-      return self
+# def labels_str(labels):
+#   if not labels:
+#     return ""
 
-  def __lt__(self, other):
-    return self.parts < other.parts
+#   kvs = ", ".join(f"{k}=\"{v}\"" for k, v in labels)
+#   return ''.join(('{', kvs, '}'))
 
-  def __bool__(self):
-    return bool(self.parts)
 
-  def __iter__(self):
-    return self.parts.__iter__()
-
-  def name(self):
-    return self.parts[-1] if self.parts else ""
-
-  def dir(self):
-    return Path(tuple(self.parts[:-1]))
-
-  def startswith(self, other):
-    if not other:
-      return True
-
-    l_other = len(other.parts)
-
-    if l_other > len(self.parts):
-      return False
-
-    for i in range(l_other):
-      if self.parts[i] != other.parts[i]:
-        return False
-
+def scope_startswith(scope, prefix):
+  if not prefix:
     return True
 
-  def lstripped(self, prefix):
-    if self.startswith(prefix):
-      lp = len(prefix.parts)
-      return Path(self.parts[lp:])
-    return self
+  if not scope:
+    return False
 
-  def to_str(self, joiner='/'):
-    return joiner.join(self.parts)
+  l_prefix = len(prefix)
+  l_scope = len(scope)
 
-  def __repr__(self):
-    return f'P({self.to_str()})'
+  if l_prefix > l_scope:
+    return False
+
+  return all(scope[i] == prefix[i] for i in range(l_prefix))
 
 
-Path.Root = Path(())
+def scope_lstrip(scope, prefix):
+  if scope_startswith(scope, prefix):
+    return scope[len(prefix):]
+  return scope
 
 
 @dataclass(frozen=True)
-class Labels:
-  # TODO: Length & number limitations?
+class ObsKey:
+  scope: tuple[str]
+  labels: tuple[tuple[str]]
 
-  keys: tuple[str]
-  vals: tuple[str]
+  def scoped(self, *new_scope):
+    new_scope = self.scope + to_scope(new_scope)
+    if self.scope == new_scope:
+      return self
 
-  def __iter__(self):
-    return zip(self.keys, self.vals)
+    return ObsKey(new_scope, self.labels)
 
-  def dict(self):
-    return dict(zip(self.keys, self.vals))
+  def labeled(self, lname, lval):
+    d = dict(self.labels)
+    d[lname] = lval
+    new_labels = tuple(sorted(d.items()))
 
-  def labeled(self, labelname, labelval):
-    d = self.dict()
-    d[labelname] = labelval
-    nk, nv = list(zip(*sorted(d.items())))
-    return Labels(keys=nk, vals=nv)
+    if new_labels == self.labels:
+      return self
 
-  def as_str(self):
-    if not self.keys:
-      return ""
+    return ObsKey(self.scope, new_labels)
 
-    kvs = ", ".join(f"{k}=\"{v}\"" for k, v in zip(self.keys, self.vals))
-    return ''.join(('{', kvs, '}'))
-
-  def __repr__(self):
-    return f"Labels({self.as_str()})"
+  def __eq__(self, other):
+    return \
+      self.scope == other.scope and \
+      self.labels == other.labels
 
   def __lt__(self, other):
-    if self.keys == other.keys:
-      return self.vals < other.vals
-    else:
-      return self.keys < other.keys
+    if self.scope < other.scope:
+      return True
 
+    return self.labels < other.labels
 
-Labels.Empty = Labels((), ())
-
-
-@dataclass(frozen=True)
-class Value:
-  value: any
-  labels: Labels
-  at: float
-
-
-@dataclass(frozen=True)
-class Reading:
-  kind: MetricKind
-  path: Path
-  val: Value
-  desc: str
-
-  @property
-  def value(self):
-    return self.val.value
-
-  @property
-  def labels(self):
-    return self.val.labels
-
-  @property
-  def at(self):
-    return self.val.at
-
-  def dir(self):
-    return self.path.dir()
+  def scope_str(self, joiner='/'):
+    return joiner.join(self.scope)
 
   def om_name(self):
     """ The "name" of this metric, with the labels if any """
     oml = self.om_labels()
-    name = self.path.name()
+    name = self.scope_str('_')
     return name + "".join(["{", oml, "}"]) if oml else name
 
   def om_labels(self):
     """OpenMetrics representation of the labels"""
     return ", ".join(f'{k}="{v}"' for k, v in self.labels)
+
+  def __repr__(self):
+    pth = "/".join(self.scope)
+    lbls = labels_as_str(self.labels)
+
+    return f"{pth}{lbls}"
+
+ObsKey.Root = ObsKey((), ())
+
+@dataclass(frozen=True)
+class Reading:
+  kind: MetricKind
+  scope: tuple[str]
+  labels: tuple[str]
+  value: any
+  desc: str
+  at: float
+
+  @property
+  def dir(self):
+    return self.scope[:-1]
+
+  @property
+  def name(self):
+    return self.scope[-1]

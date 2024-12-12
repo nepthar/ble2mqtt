@@ -3,10 +3,10 @@ from collections import namedtuple
 import time
 import sys
 
-from .data import Path
+from .data import ObsKey, to_scope
 
 
-LogEntry = namedtuple('LogEntry', ('level', 'at', 'path', 'labels', 'text', 'values'))
+LogEntry = namedtuple('LogEntry', ('level', 'at', 'key', 'text', 'values'))
 
 
 class Level(Enum):
@@ -17,10 +17,9 @@ class Level(Enum):
 
 
 class BaseLogger:
-  def __init__(self, path, labels=dict(), registry=None):
+  def __init__(self, key=ObsKey.Root, registry=None):
     self.registry = registry
-    self.path = Path.of(path)
-    self.labels = labels
+    self.key = key
     self._level_val = registry.level.value if registry else Level.INF.value
 
   def set_level(self, new_level):
@@ -51,17 +50,17 @@ class EntryLogger(BaseLogger):
     pass
 
   def handle(self, level, at, msg, vals):
-    self.on_entry(LogEntry(level, at, self.path, self.labels, msg, vals))
+    self.on_entry(LogEntry(level, at, self.key, msg, vals))
 
 
 class TextLogger(BaseLogger):
 
   FORMAT = "{level} {hh:02d}:{mm:02d}:{ss:02d}{tag} {text}\n"
 
-  def __init__(self, registry, path=Path.Root, writeable=sys.stderr, labels=dict()):
+  def __init__(self, writeable=sys.stderr, key=ObsKey.Root, registry=None):
     self.writeable = writeable
-    self.tag = f" [{path.as_str()}]" if path else ""
-    super().__init__(registry, path, labels)
+    self.tag = f" [{key.om_name()}]" if key.scope else ""
+    super().__init__(key=key, registry=registry)
 
   def handle(self, level, at, text, values):
     message_text = text.format(values)
