@@ -1,77 +1,80 @@
-from .data import ObsKey
+from .data import ObsKey, ObsLevel
 
+from .timeseries import Histogram, BucketCounters
 from .metric import Gauge, Counter, Stat, State
 
 
 class Observer:
-  def __init__(self, key, registry):
+  def __init__(self, registry, key=ObsKey.Root):
     self.key = key
     self.registry = registry
+    self.level = ObsLevel.INF
+    self.children = set()
 
-  def _get_(self, klass, name, desc, **kwargs):
-    return self.registry.find_or_create(
+  def _get_(self, klass, key, desc, level, **kwargs):
+    metric = self.registry.find_or_create(
       klass=klass,
-      key=self.key.scoped(name),
-      obs=self,
+      observer=self,
+      key=key,
       desc=desc,
+      level=level,
       **kwargs
     )
 
+    self.children.add(metric)
+    return metric
+
+  def set_level(new_level):
+    self.level = new_level
+    for c in self.children:
+      c.set_level(new_level)
+
   def labeled(self, lname, lval):
-    new_key = self.key.labaled(lname, lval)
-    return self if new_key is self.key else Observer(new_key, self.registry)
+    new_key = self.key.labeled(lname, lval)
+    if new_key == self.key:
+      return self
+    else:
+      new_obs = Observer(self.registry, new_key)
+      self.children.add(new_obs)
+      return new_obs
 
   def scoped(self, *scope):
     new_key = self.key.scoped(*scope)
-    return self if new_key is self.key else Observer(new_key, self.registry)
+    if new_key == self.key:
+      return self
+    else:
+      new_obs = Observer(self.registry, new_key)
+      self.children.add(new_obs)
+      return new_obs
 
   def counter(self, name, desc=""):
-    return self._get_(Counter, name, desc)
+    key = self.key.scoped(name)
+    return self._get_(Counter, key, desc, self.level)
 
   def gauge(self, name, desc=""):
-    return self._get_(Gauge, name, desc)
+    key = self.key.scoped(name)
+    return self._get_(Gauge, key, desc, self.level)
 
   def stat(self, name, desc="", **kwargs):
-    return self._get_(Stat, name, desc, **kwargs)
+    key = self.key.scoped(name)
+    return self._get_(Stat, key, desc, self.level, **kwargs)
 
   def state(self, name, desc="", state=None, states=set(), **kwargs):
-    return self._get_(State, name, desc, state=state, states=states, **kwargs)
+    key = self.key.scoped(name)
+    return self._get_(State, key, desc, self.level, state=state, states=states, **kwargs)
+
+  def hist(self, name, desc="", sample_count=5000, time_window_s=60, **kwargs):
+    key = self.key.scoped(name)
+    return self._get_(BucketCounters,
+      key, desc, self.level,
+      sample_count=sample_count,
+      time_window_s=time_window_s,
+      **kwargs
+    )
 
   def log(self, name):
-    return self.registry.find_or_create_log(self.key.scoped(name))
-
-
-
-
-# class Observer2:
-#   def __init__(self, registry, path=Path(())):
-#     self.path = Path.of(path)
-#     self.registry = registry
-
-#   def _mk_(self, klass, name, desc, labels=Labels.Empty, **kwargs):
-#     return self.registry.find_or_create(
-#       klass=klass,
-#       reporter=self,
-#       path=self.path.plus(name),
-#       desc=desc,
-#       labels=labels,
-#       **kwargs,
-#     )
-
-#   def scoped(self, *new_path):
-#     return Observer(self.registry, self.path.plus(*new_path))
-
-#   def counter(self, name, desc=""):
-#     return self._mk_(Counter, name, desc)
-
-#   def gauge(self, name, desc=""):
-#     return self._mk_(Gauge, name, desc)
-
-#   def stat(self, name, desc="", **kwargs):
-#     return self._mk_(Stat, name, desc, **kwargs)
-
-#   def state(self, name, desc="", state=None, states=set(), **kwargs):
-#     return self._mk_(State, name, desc, state=state, states=states, **kwargs)
+    key = self.key.scoped(name)
+    return self.registry.find_or_create_log(key, self.level)
 
 
 class NullObserver(Observer):

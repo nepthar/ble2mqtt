@@ -3,24 +3,17 @@ from collections import namedtuple
 import time
 import sys
 
-from .data import ObsKey, to_scope
+from .data import ObsKey, to_scope, ObsLevel
 
 
 LogEntry = namedtuple('LogEntry', ('level', 'at', 'key', 'text', 'values'))
-
-
-class Level(Enum):
-  OFF = 0
-  DBG = 2
-  INF = 3
-  ERR = 5
 
 
 class BaseLogger:
   def __init__(self, key=ObsKey.Root, registry=None):
     self.registry = registry
     self.key = key
-    self._level_val = registry.level.value if registry else Level.INF.value
+    self._level_val = registry.level.value if registry else ObsLevel.INF.value
 
   def set_level(self, new_level):
     self._level_val = new_level.value
@@ -32,16 +25,16 @@ class BaseLogger:
     self.info(text, values)
 
   def dbg(self, msg, *vals):
-    if self._level_val >= Level.DBG.value:
-      self.handle(Level.DBG, time.time(), msg, vals)
+    if self._level_val >= ObsLevel.DBG.value:
+      self.handle(ObsLevel.DBG, time.time(), msg, vals)
 
   def inf(self, msg, *vals):
-    if self._level_val >= Level.INF.value:
-      self.handle(Level.INF, time.time(), msg, vals)
+    if self._level_val >= ObsLevel.INF.value:
+      self.handle(ObsLevel.INF, time.time(), msg, vals)
 
   def err(self, msg, *vals):
-    if self._level_val >= Level.ERR.value:
-      self.handle(Level.ERR, time.time(), msg, vals)
+    if self._level_val >= ObsLevel.ERR.value:
+      self.handle(ObsLevel.ERR, time.time(), msg, vals)
 
 
 class EntryLogger(BaseLogger):
@@ -70,6 +63,6 @@ class TextLogger(BaseLogger):
       hh=ts.tm_hour, mm=ts.tm_min, ss=ts.tm_sec,
       tag=self.tag,
       text=message_text
-      ))
+    ))
 
 

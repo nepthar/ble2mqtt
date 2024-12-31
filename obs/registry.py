@@ -1,6 +1,6 @@
 from .metric import *
-from .data import Reading
-from .logger import TextLogger, Level
+from .data import Reading, to_scope
+from .logger import TextLogger, ObsLevel
 from threading import RLock
 import time
 
@@ -30,9 +30,6 @@ class Readings:
     )
     return Readings(items=new_items, at=self.at)
 
-  def grouped(self):
-    pass
-
   def as_dict(self):
     ret = {}
     for r in self.items:
@@ -56,19 +53,34 @@ class Registry:
     self.metrics = dict()
     self.logs = dict()
     self.logger = logger
-    self.level = Level.INF
+    self.level = ObsLevel.INF
 
-  def find_or_create_log(self, key):
+  def find_or_create_log(self, key, level):
     if key not in self.logs:
       self.logs[key] = self.logger(key=key, registry=self)
 
-    return self.logs[key]
+    log = self.logs[key]
+    log.set_level(level)
 
-  def find_or_create(self, klass, key, obs, desc, **kwargs):
+    return log
+
+  def peek(self, key):
+    if key in self.metrics:
+      return self.metrics[key].peek()
+
+  def get(self, klass, key):
+    metric = self.metric.get(key)
+    if metric and klass != metric.__class__:
+      raise Exception("Metric class mismatch")
+
+    return metric
+
+  def find_or_create(self, klass, observer, key, desc, level, **kwargs):
     if key not in self.metrics:
       self.metrics[key] = klass(
         key=key,
-        observer=obs,
+        observer=observer,
+        level=level,
         desc=desc,
         **kwargs
       )
@@ -81,21 +93,25 @@ class Registry:
     return metric
 
   def collect(self):
-    return Readings(tuple(self._readings_()))
+    return Readings(tuple(self.readings()))
 
-  def _readings_(self):
+  def readings(self, level=ObsLevel.INF, prefix=(), after=0):
+    """ Gather all readings in this registry, optionally filtering """
+    lv = level.value
+    prefix = to_scope(prefix)
+
     for key, metric in sorted(self.metrics.items()):
-      if metric.value_fn:
+      if lv >= metric.level.value and key.scope_startswith(prefix):
         metric.update()
-
-      yield Reading(
-        value=metric.value,
-        scope=key.scope,
-        labels=key.labels,
-        kind=metric.kind,
-        desc=metric.desc,
-        at=metric.last_sample_at
-      )
+        if metric.last_sample_at >= after:
+          yield Reading(
+            value=metric.value,
+            scope=key.scope_lstripped(prefix),
+            labels=key.labels,
+            kind=metric.kind,
+            desc=metric.desc,
+            at=metric.last_sample_at
+          )
 
 
 class ThreadsafeRegistry:
@@ -107,8 +123,8 @@ class ThreadsafeRegistry:
     with self.lock:
       return self._reg.find_or_create(klass, reporter, path, desc, labels, **kwargs)
 
-  def read(self):
+  def collect(self):
     # Materialize items into a list right away and release the lock
     with self.lock:
-      return self._reg.read()
+      return self._reg.collect()
 

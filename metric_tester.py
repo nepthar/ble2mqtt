@@ -1,7 +1,11 @@
-from obs import observer
+from obs.observer import Observer
+from obs.registry import Registry
 from pprint import pp
 
-rep = observer().scoped("test")
+reg = Registry()
+obs = Observer(reg)
+
+rep = obs.scoped("test")
 
 c1 = rep.counter("c1")
 c1.inc()
@@ -27,12 +31,31 @@ c3l3.inc()
 c3l2.inc()
 c3l3.inc()
 
-log = rep.log('hi')
+log = rep.labeled("instance", "0").log('hi')
 
 log.inf("hello there")
 log.dbg("debug me")
 
-pp(observer().registry.collect().as_dict())
+#pp(observer().registry.collect().as_dict())
+
+
+h = rep.hist("myhist")
+
+h.rec(45)
+h.rec(100)
+for i in range(300, 400):
+  h.rec(i)
+
+h.rec(100000)
+
+
+pp(h.read())
+
+
+readings = reg.collect()
+
+for r in readings:
+  pp(r)
 
 # def process_readings(readings):
 #   if not readings:

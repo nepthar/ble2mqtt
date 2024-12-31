@@ -4,7 +4,7 @@ from .data import ObsKey
 from time import time
 
 REGISTRY = Registry()
-OBSERVER = Observer(ObsKey.Root, REGISTRY)
+OBSERVER = Observer(REGISTRY)
 
 OBSERVER.gauge(
   "started_s", desc="Unix epoch timestamp of module initialization"

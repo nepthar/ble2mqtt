@@ -2,7 +2,14 @@ from dataclasses import dataclass
 from enum import Enum
 
 
-class MetricKind(Enum):
+class ObsLevel(Enum):
+  OFF = 0
+  DBG = 2
+  INF = 3
+  ERR = 5
+
+
+class ObsKind(Enum):
   LOG = 0
   COUNTER = 1
   GAUGE = 2
@@ -10,7 +17,10 @@ class MetricKind(Enum):
   STAT = 4
   INFO = 5
   GROUP = 6
-  UNKNOWN = 7
+  HIST = 7
+  BCOUNTER = 8
+  UNKNOWN = 100
+
 
 def to_scope(x):
   if x:
@@ -25,14 +35,6 @@ def to_scope(x):
     raise ValueError(f"Cannot make a scope path from {x}")
   else:
     return ()
-
-
-# def labels_str(labels):
-#   if not labels:
-#     return ""
-
-#   kvs = ", ".join(f"{k}=\"{v}\"" for k, v in labels)
-#   return ''.join(('{', kvs, '}'))
 
 
 def scope_startswith(scope, prefix):
@@ -79,22 +81,41 @@ class ObsKey:
 
     return ObsKey(self.scope, new_labels)
 
+  def scope_startswith(self, prefix):
+    prefix = to_scope(prefix)
+    # This is always true - an empty prefix matches any scope
+    if not prefix:
+      return True
+
+    if not self.scope:
+      return False
+
+    l_prefix = len(prefix)
+    l_scope = len(self.scope)
+
+    return \
+      l_prefix > l_scope and \
+      all(scope[i] == prefix[i] for i in range(l_prefix))
+
+  def scope_lstripped(self, prefix):
+    if self.scope_startswith(prefix):
+      return self.scope[len(prefix):]
+
   def __eq__(self, other):
     return \
       self.scope == other.scope and \
       self.labels == other.labels
 
   def __lt__(self, other):
-    if self.scope < other.scope:
-      return True
-
-    return self.labels < other.labels
+    return \
+      self.scope < other.scope or \
+      self.labels < other.labels
 
   def scope_str(self, joiner='/'):
     return joiner.join(self.scope)
 
   def om_name(self):
-    """ The "name" of this metric, with the labels if any """
+    """OpenMetrics name of this metric key with the labels if any"""
     oml = self.om_labels()
     name = self.scope_str('_')
     return name + "".join(["{", oml, "}"]) if oml else name
@@ -111,9 +132,10 @@ class ObsKey:
 
 ObsKey.Root = ObsKey((), ())
 
+
 @dataclass(frozen=True)
 class Reading:
-  kind: MetricKind
+  kind: ObsKind
   scope: tuple[str]
   labels: tuple[str]
   value: any
