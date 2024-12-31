@@ -3,64 +3,66 @@ from enum import Enum
 from dataclasses import dataclass
 from collections import namedtuple
 
-from .data import Reading, Value, Labels, Path, MetricKind
+from .data import Reading, ObsKey, ObsKind
+
 
 class Metric:
+
+  kind: ObsKind = ObsKind.UNKNOWN
+
+  default = None
+
   __slots__ = (
-    "path",
-    "desc",
-    "value",
-    "value_fn",
-    "reporter",
-    "kwargs",
-    "labeles",
-    "last_sample_at",
+    'key',
+    'observer',
+    'desc',
+    'value',
+    'value_fn',
+    'last_sample_at',
+    'level',
+    'kwargs'
   )
 
-  # The kind of metric used to generate Record
-  kind: MetricKind
-
-  # Whether or not this metric allows `value_fn`
-  allow_fn: True
-
-  def __init__(
-    self, reporter, path, desc="", labels=dict(), value=None, value_fn=None, **kwargs
-  ):
-    if not path:
-      raise Exception("Path must not be empty")
-
-    self.reporter = reporter
-    self.path = path
+  def __init__(self, key, observer, level, desc="", **kwargs):
+    self.key = key
+    self.observer = observer
     self.desc = desc
-    self.labels = labels
     self.kwargs = kwargs
+    self.level = level
+
+    self.value = None
+    self.value_fn = None
     self.last_sample_at = 0
-    self.value = value
-    self.value_fn = value_fn
 
     self._init_metric_(**kwargs)
-
-  def name(self):
-    return self.path.name()
 
   def _init_metric_(self, **kwargs):
     pass
 
-  def labeled(self, label, label_val):
-    new_labels = self.labels.labeled(label, label_val)
-    return self.reporter.with_labels(self, new_labels)
+  def labeled(self, lname, lval):
+    new_key = self.key.labeled(lname, lval)
+    return self.observer._get_(
+      klass=self.__class__,
+      key=new_key,
+      desc=self.desc,
+      level=self.level,
+      **self.kwargs
+    )
+
+    return ret
 
   def peek(self):
     """Peek at the value of this metric. Sometimes this is not possible
     Like in histograms, etc.
     """
-    if self.value:
-      return self.value
+    if self.last_sample_at:
+      if self.value:
+        return self.value
 
-    if self.value_fn:
-      return "fn()"
+      if self.value_fn:
+        return f"fn()->{self.value}"
 
-    return "n/a"
+    return self.default
 
   def set_fn(self, value_fn):
     """Have this metric use `value_fn` to retrieve the value when collected"""
@@ -68,80 +70,67 @@ class Metric:
     self.last_sample_at = 0
     self.value_fn = value_fn
 
-  def set(self, value, at=time.time()):
+  def set(self, value):
     assert self.value_fn is None, "Cannot set a metric with a value_fn"
     self.value = value
-    self.last_sample_at = at
+    self.last_sample_at = time.time()
 
-  def update(self, at=time.time()):
-    assert self.value_fn is not None, "Cannot update a metric without a value_fn"
-    self.value = self.value_fn()
-    self.last_sample_at = at
+  def update(self):
+    """ Update this metric from the given function if it has one. Noop if not """
+    if self.value_fn:
+      self.value = self.value_fn()
+      self.last_sample_at = time.time()
 
-  def to_value(self):
-    return Value(self.value, self.labels, self.last_sample_at)
-
-  def __repr__(self):
-    return f"{self.__class__.__name__}({self.name()}, value={self.peek()})"
-
-  def __str__(self):
-    return self.__repr__()
-
-  def __lt__(self, other):
-    if self.path < other.path:
-      return True
-    elif self.path == other.path:
-      return tuple(self.labels.keys()) < tuple(other.labels.keys())
-    else:  # self.path > other.path
-      return False
-
-  def __eq__(self, other):
-    return self.path == other.path and self.labels == other.labels
+  def read(self):
+    self.update()
+    return self.value, self.last_sample_at
 
 
 class Counter(Metric):
-  kind = MetricKind.COUNTER
+  kind = ObsKind.COUNTER
+  default = 0
 
-  def _init_metric_(self, **kwargs):
-    if self.value is None:
-      self.value = 0
+  def _init_metric_(self, value=0, **kwargs):
+    self.value = value
 
   def set_fn(self, value_fn):
     raise NotImplementedError("Counters do not use functions")
 
-  def inc(self, amt=1, at=time.time()):
-    self.last_sample_at = at
-    self.value += amt
+  def inc(self, amt=1):
+    assert amt > 0, "Amount must be positive"
+    self.set(self.value + amt)
 
 
 class Gauge(Metric):
-  kind = MetricKind.GAUGE
+  kind = ObsKind.GAUGE
 
-  def inc(self, amt=1.0, at=time.time()):
-    self.set(self.value + amt, at)
+  def _init_metric_(self, value=None, **kwargs):
+    self.value = value
 
-  def dec(self, amt=1.0, at=time.time()):
-    self.set(self.value - amt, at)
+  def inc(self, amt=1.0):
+    self.set(self.value + amt)
+
+  def dec(self, amt=1.0):
+    self.set(self.value - amt)
 
 
 class State(Metric):
-  kind = MetricKind.STATE
+  kind = ObsKind.STATE
 
   def _init_metric_(self, states=[], **kwargs):
-    self.states = set(states)
-    self.restrict = bool(states)
+    self.allowed_states = set(states) if states else None
 
-  def set(self, new_state, at=time.time()):
+  def set(self, new_state):
     assert isinstance(new_state, str)
 
-    if self.restrict and new_state not in self.states:
+    if self.allowed_states and new_state not in self.allowed_states:
       raise Exception(f"State {new_state} is not in {self.states}")
 
-    self.states.add(new_state)
-    super().set(new_state, at)
+    super().set(new_state)
 
 
 class Stat(Metric):
+  kind = ObsKind.STAT
   pass
 
 
@@ -165,6 +154,9 @@ class NullMetric(Metric):
 
   def rec(*args, **kwargs):
     pass
+
+  def get(self):
+    return (None, 0)
 
   def collect(self):
     yield from ()

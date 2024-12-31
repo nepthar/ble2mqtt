@@ -1,32 +1,41 @@
 from .metric import *
-from .data import Value, Reading, Labels, Path
+from .data import Reading, to_scope
+from .logger import TextLogger, ObsLevel
 from threading import RLock
 import time
+
 
 class Readings:
   def __init__(self, items, at=time.time()):
     self.items = items
     self.at = at
 
-  def filtered(self, prefix):
-    pp = Path.of(prefix)
+  def filtered(self, prefix=(), after=0):
+    if not prefix or after:
+      return self
+
+    def inc(scope, at):
+      return at > after and scope_startswith(scope, prefix)
+
+    prefix = to_scope(prefix)
     new_items = tuple(
       Reading(
+        value=r.value,
+        scope=scope_lstrip(r.scope, prefix),
+        labels=r.labels,
         kind=r.kind,
-        path=r.path.lstripped(r.path),
-        val=r.val,
-        desc=r.desc
-      ) for r in self.items if r.path.startswith(pp)
+        desc=r.desc,
+        at=r.at
+      ) for r in self.items if inc(r.scope, r.at)
     )
     return Readings(items=new_items, at=self.at)
 
   def as_dict(self):
     ret = {}
     for r in self.items:
-      group = r.dir()
-      key = r.om_name()
+      group = r.scope
       ret.setdefault(group, {})
-      ret[group][key] = r
+      ret[group][r.labels] = r
 
     return ret
 
@@ -35,50 +44,74 @@ class Readings:
 
 
 class Registry:
-  def __init__(self):
+  def __init__(self, logger=TextLogger):
     # stored as: :
     # { Path(the, path): { (): Metric, (label1, lablevalue1): Metric }
     # That is, `metrics` is a dict of dicts, where the key for the first
     # is the metric path, and the key for the second is the metric labels,
     # sorted and turned into a tuple of tuple (k, v).
     self.metrics = dict()
+    self.logs = dict()
+    self.logger = logger
+    self.level = ObsLevel.INF
 
-  def find_or_create(self, klass, reporter, path, desc, labels, **kwargs):
-    if path not in self.metrics:
-      self.metrics[path] = {}
+  def find_or_create_log(self, key, level):
+    if key not in self.logs:
+      self.logs[key] = self.logger(key=key, registry=self)
 
-    metric = self.metrics[path].get(labels)
+    log = self.logs[key]
+    log.set_level(level)
 
-    if metric:
-      if klass != metric.__class__:
-        raise Exception("Metric class mismatch")
-      return metric
+    return log
 
-    metric = klass(reporter=reporter, path=path, desc=desc, labels=labels, **kwargs)
+  def peek(self, key):
+    if key in self.metrics:
+      return self.metrics[key].peek()
 
-    self.metrics[path][labels] = metric
+  def get(self, klass, key):
+    metric = self.metric.get(key)
+    if metric and klass != metric.__class__:
+      raise Exception("Metric class mismatch")
+
     return metric
 
-  def read(self, prefix=None, after=0):
-    return Readings(tuple(self._read_iter_(prefix, after)))
+  def find_or_create(self, klass, observer, key, desc, level, **kwargs):
+    if key not in self.metrics:
+      self.metrics[key] = klass(
+        key=key,
+        observer=observer,
+        level=level,
+        desc=desc,
+        **kwargs
+      )
 
-  def _read_iter_(self, prefix, after):
-    """ Create an interator of all readings with options to filter by
-        path prefix, timestamp or both
-    """
-    ppfx = Path.of(prefix)
-    for path, group in sorted(self.metrics.items()):
-      if path.startswith(ppfx):
-        for metric in group.values():
-          if metric.value_fn:
-            metric.update()
-          if metric.last_sample_at > after:
-            yield Reading(
-              kind=metric.kind,
-              path=path.lstripped(ppfx),
-              val=metric.to_value(),
-              desc=metric.desc
-            )
+    metric = self.metrics[key]
+
+    if klass != metric.__class__:
+      raise Exception("Metric class mismatch")
+
+    return metric
+
+  def collect(self):
+    return Readings(tuple(self.readings()))
+
+  def readings(self, level=ObsLevel.INF, prefix=(), after=0):
+    """ Gather all readings in this registry, optionally filtering """
+    lv = level.value
+    prefix = to_scope(prefix)
+
+    for key, metric in sorted(self.metrics.items()):
+      if lv >= metric.level.value and key.scope_startswith(prefix):
+        metric.update()
+        if metric.last_sample_at >= after:
+          yield Reading(
+            value=metric.value,
+            scope=key.scope_lstripped(prefix),
+            labels=key.labels,
+            kind=metric.kind,
+            desc=metric.desc,
+            at=metric.last_sample_at
+          )
 
 
 class ThreadsafeRegistry:
@@ -90,73 +123,8 @@ class ThreadsafeRegistry:
     with self.lock:
       return self._reg.find_or_create(klass, reporter, path, desc, labels, **kwargs)
 
-  def read(self):
+  def collect(self):
     # Materialize items into a list right away and release the lock
     with self.lock:
-      return self._reg.read()
+      return self._reg.collect()
 
-
-class MetricReporter:
-  def __init__(self, registry, path=Path(())):
-    self.path = Path.of(path)
-    self.registry = registry
-
-  def _mk_(self, klass, name, desc, labels=Labels.Empty, **kwargs):
-    return self.registry.find_or_create(
-      klass=klass,
-      reporter=self,sd
-      path=self.path.plus(name),
-      desc=desc,
-      labels=labels,
-      **kwargs,
-    )
-
-  def scoped(self, *new_path):
-    return MetricReporter(self.registry, self.path.plus(*new_path))
-
-  def with_labels(self, metric, labels):
-    return self._mk_(
-      klass=metric.__class__,
-      name=metric.path.name(),
-      desc=metric.desc,
-      labels=labels,
-      **metric.kwargs,
-    )
-
-  def counter(self, name, desc=""):
-    return self._mk_(Counter, name, desc)
-
-  def gauge(self, name, desc=""):
-    return self._mk_(Gauge, name, desc)
-
-  def stat(self, name, desc="", **kwargs):
-    return self._mk_(Stat, name, desc, **kwargs)
-
-  def state(self, name, desc="", state=None, states=set(), **kwargs):
-    return self._mk_(State, name, desc, state=state, states=states, **kwargs)
-
-
-class NullMetricReporter(MetricReporter):
-  def __init__(self):
-    self.null_metric = NullMetric(reporter=self, path=Path.of("null"), desc="NullMetric")
-
-  def scoped(self, *args, **kwargs):
-    return self.null_metric
-
-  def labeled(self, *args, **kwargs):
-    return self.null_metric
-
-  def counter(self, *args, **kwargs):
-    return self.null_metric
-
-  def gauge(self, *args, **kwargs):
-    return self.null_metric
-
-  def enum(self, *args, **kwargs):
-    return self.null_metric
-
-  def stat(self, *args, **kwargs):
-    return self.null_metric
-
-  def state(self, *args, **kwargs):
-    return self.null_metric
